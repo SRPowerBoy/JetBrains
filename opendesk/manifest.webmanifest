@@ -1,0 +1,20 @@
+{
+  "name": "OpenDesk",
+  "short_name": "OpenDesk",
+  "description": "Free, open-source office suite that runs entirely in your browser.",
+  "start_url": "./index.html",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#f3f3f3",
+  "theme_color": "#2b6cb0",
+  "icons": [
+    { "src": "icons/icon.svg", "sizes": "any", "type": "image/svg+xml" },
+    { "src": "icons/icon-192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "icons/icon-512.png", "sizes": "512x512", "type": "image/png" }
+  ],
+  "shortcuts": [
+    { "name": "New document", "url": "writer.html?new" },
+    { "name": "New spreadsheet", "url": "sheets.html?new" },
+    { "name": "New presentation", "url": "slides.html?new" }
+  ]
+}

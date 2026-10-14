@@ -105,9 +105,12 @@ const OpenDesk = (() => {
     }
     if (!data) return;
     if (data.app !== cfg.app) { alert(`This link is for OpenDesk ${data.app}, not this app.`); return; }
-    snapshot('Before opening a shared link');
-    cfg.setState(data.state);
-    snapshot('Opened from shared link');
+    // Open as a new file so nothing the recipient already has is touched.
+    const id = Docs.create(cfg.app, data.state);
+    if (!id) return;
+    pushHistory(Docs.key(id), data.state, 'Opened from shared link');
+    if (cfg.isEmpty?.()) Docs.remove(cfg.id); // drop the blank file created just to land here
+    location.replace(Docs.url(cfg.app, id));
   }
 
   // ---------- version history ----------
@@ -231,10 +234,16 @@ const OpenDesk = (() => {
   const fmt = v => typeof v === 'number' ? (Number.isInteger(v) ? String(v) : String(+v.toPrecision(10)))
     : typeof v === 'boolean' ? (v ? 'TRUE' : 'FALSE') : v == null ? '' : String(v);
 
-  function rangeRows(range) {
+  // Live blocks name their spreadsheet by id; blocks made before multi-file support use the newest one.
+  // An id that isn't on this device (e.g. a shared document) never falls back to an unrelated sheet.
+  const sheetFor = id => (id ? (Docs.meta(id)?.app === 'sheets' ? id : null) : Docs.list('sheets')[0]?.id);
+
+  function rangeRows(range, sheetId) {
     const m = RANGE_RE.exec(String(range).toUpperCase().trim());
     if (!m) return null;
-    const saved = Store.get('opendesk.sheets');
+    const sid = sheetFor(sheetId);
+    if (!sid) return null;
+    const saved = Docs.get(sid);
     const values = saved?.raw ? SheetEngine.computeAll(saved.raw) : {};
     const c1 = m[1].charCodeAt(0), r1 = +m[2], c2 = (m[3] || m[1]).charCodeAt(0), r2 = +(m[4] || m[2]);
     const rows = [];
@@ -252,10 +261,13 @@ const OpenDesk = (() => {
     return { labels: data.map(d => d.label), values: data.map(d => d.value) };
   }
 
-  function renderLive(range, mode) {
-    const rows = rangeRows(range);
-    const tag = `<div class="live-tag">⇄ Sheets ${esc(String(range).toUpperCase())}</div>`;
-    if (!rows) return tag + '<p>Invalid range.</p>';
+  // fallbackRows: last known values, shown when the spreadsheet isn't on this device.
+  function renderLive(range, mode, sheetId, fallbackRows) {
+    const sid = sheetFor(sheetId);
+    const rows = sid ? rangeRows(range, sid) : fallbackRows;
+    const source = sid ? Docs.meta(sid).title : rows ? 'Snapshot — spreadsheet not on this device' : 'Spreadsheet not on this device';
+    const tag = `<div class="live-tag">⇄ ${esc(source)} · ${esc(String(range).toUpperCase())}</div>`;
+    if (!rows) return tag + (sid ? '<p>Invalid range.</p>' : '<p>The linked spreadsheet isn\'t available here.</p>');
     if (mode === 'chart') {
       const { labels, values } = chartData(rows);
       if (!values.length) return tag + '<p>No numbers in the second column of this range.</p>';
@@ -282,23 +294,24 @@ const OpenDesk = (() => {
   function askRange() {
     return new Promise(resolve => {
       const m = modal('Insert live spreadsheet data');
-      const saved = Store.get('opendesk.sheets');
-      const cells = Object.keys(saved?.raw || {});
+      const sheets = Docs.list('sheets');
       m.body.innerHTML = `
-        <p class="hint">Shows a range from your OpenDesk Sheets spreadsheet. It updates automatically when the spreadsheet changes — even in another tab.</p>
-        ${cells.length ? '' : '<p class="hint warn">Your spreadsheet is empty. Add data in Sheets first — the range will fill in once you do.</p>'}
+        <p class="hint">Shows a range from one of your spreadsheets. It updates automatically when that spreadsheet changes — even in another tab.</p>
+        ${sheets.length ? '' : '<p class="hint warn">You have no spreadsheets yet. Create one in OpenDesk Sheets first.</p>'}
+        <label class="field">Spreadsheet <select id="sh">${sheets.map(d => `<option value="${esc(d.id)}">${esc(d.title)}</option>`).join('')}</select></label>
         <label class="field">Range <input id="rg" value="A1:B5" placeholder="A1:C10" spellcheck="false"></label>
         <label class="field">Show as <select id="md"><option value="table">Table</option><option value="chart">Bar chart (labels in 1st column, numbers in 2nd)</option></select></label>
         <div class="preview"></div>
         <button class="primary" id="ins">Insert</button>`;
-      const rg = m.body.querySelector('#rg'), md = m.body.querySelector('#md'), pv = m.body.querySelector('.preview');
-      const update = () => { pv.innerHTML = RANGE_RE.test(rg.value.toUpperCase().trim()) ? renderLive(rg.value, md.value) : '<p class="hint warn">Enter a range like A1:C10</p>'; };
-      rg.oninput = md.onchange = update; update();
+      const rg = m.body.querySelector('#rg'), md = m.body.querySelector('#md'), sh = m.body.querySelector('#sh'), pv = m.body.querySelector('.preview');
+      const update = () => { pv.innerHTML = RANGE_RE.test(rg.value.toUpperCase().trim()) ? renderLive(rg.value, md.value, sh.value) : '<p class="hint warn">Enter a range like A1:C10</p>'; };
+      rg.oninput = md.onchange = sh.onchange = update; update();
       let done = false;
       m.body.querySelector('#ins').onclick = () => {
         const range = rg.value.toUpperCase().trim();
         if (!RANGE_RE.test(range)) return;
-        done = true; m.close(); resolve({ range, mode: md.value });
+        if (!sh.value) return;
+        done = true; m.close(); resolve({ range, mode: md.value, sheet: sh.value });
       };
       const obs = new MutationObserver(() => { if (!document.body.contains(m.body)) { obs.disconnect(); if (!done) resolve(null); } });
       obs.observe(document.body, { childList: true });
@@ -307,7 +320,10 @@ const OpenDesk = (() => {
 
   // Call fn whenever the spreadsheet changes (other tabs via 'storage', same tab on focus).
   function onSheetChange(fn) {
-    addEventListener('storage', e => { if (e.key === 'opendesk.sheets') fn(); });
+    addEventListener('storage', e => {
+      const m = /^opendesk\.doc\.([^.]+)$/.exec(e.key || '');
+      if (m && Docs.meta(m[1])?.app === 'sheets') fn();
+    });
     addEventListener('focus', fn);
   }
 

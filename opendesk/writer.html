@@ -4,8 +4,10 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>OpenDesk Writer</title>
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icons/icon.svg" type="image/svg+xml">
 <link rel="stylesheet" href="common.css">
-<script src="https://cdn.jsdelivr.net/npm/mammoth@1.6.0/mammoth.browser.min.js"></script>
+<script src="vendor/mammoth.browser.min.js"></script>
 <style>
   .scroll { flex: 1; overflow: auto; padding: 24px 16px; }
   #page {
@@ -88,7 +90,8 @@
 <script>
 const page = document.getElementById('page');
 const titleEl = document.getElementById('title');
-const KEY = 'opendesk.writer';
+const BLANK = { title: 'Untitled document', html: '' };
+const DOC = Docs.open('writer', BLANK);
 
 function exec(cmd, val = null) { page.focus(); document.execCommand(cmd, false, val); save(); }
 
@@ -100,16 +103,20 @@ let saveTimer;
 function save() {
   updateStatus();
   clearTimeout(saveTimer);
-  saveTimer = setTimeout(() => Store.set(KEY, { title: titleEl.value, html: page.innerHTML }), 400);
+  saveTimer = setTimeout(() => { if (DOC.id) Docs.save(DOC.id, { title: titleEl.value, html: page.innerHTML }); }, 400);
 }
 
+// Stored HTML may come from a share link or an old version, so always sanitize it.
 function load(title, html) {
-  titleEl.value = title; page.innerHTML = html || '<p><br></p>'; save();
+  titleEl.value = title; page.innerHTML = sanitizeHTML(html || '') || '<p><br></p>'; updateStatus();
 }
+document.title = (DOC.state.title || 'Untitled') + ' – OpenDesk Writer';
+load(String(DOC.state.title || BLANK.title), DOC.state.html);
 
-const saved = Store.get(KEY);
-if (saved) load(saved.title, saved.html);
-updateStatus();
+function openAsNewFile(title, html) {
+  const id = Docs.create('writer', { title, html: sanitizeHTML(html) });
+  if (id) location.href = Docs.url('writer', id);
+}
 
 page.addEventListener('input', save);
 titleEl.addEventListener('input', save);
@@ -131,9 +138,7 @@ function wrapDoc(body) {
 }
 
 const actions = {
-  new() {
-    if (confirm('Start a new document? Unsaved changes in this one will be replaced.')) load('Untitled document', '');
-  },
+  new() { location.href = 'writer.html?new'; },
   async open() {
     const file = await pickFile('.docx,.html,.htm,.txt,.md');
     if (!file) return;
@@ -141,12 +146,12 @@ const actions = {
     if (/\.docx$/i.test(file.name)) {
       if (!window.mammoth) return alert('The .docx importer failed to load (are you offline?).');
       const result = await mammoth.convertToHtml({ arrayBuffer: await file.arrayBuffer() });
-      load(name, result.value);
+      openAsNewFile(name, result.value);
     } else if (/\.html?$/i.test(file.name)) {
-      load(name, sanitizeHTML(await file.text()));
+      openAsNewFile(name, await file.text());
     } else {
       const div = document.createElement('div');
-      load(name, (await file.text()).split(/\n/).map(line => { div.textContent = line; return `<p>${div.innerHTML || '<br>'}</p>`; }).join(''));
+      openAsNewFile(name, (await file.text()).split(/\n/).map(line => { div.textContent = line; return `<p>${div.innerHTML || '<br>'}</p>`; }).join(''));
     }
   },
   link() {
@@ -173,15 +178,12 @@ const actions = {
     if (!choice) return;
     page.focus();
     if (saved) { sel.removeAllRanges(); sel.addRange(saved); }
-    exec('insertHTML', `<div class="live-range" contenteditable="false" data-range="${choice.range}" data-mode="${choice.mode}">${OpenDesk.renderLive(choice.range, choice.mode)}</div><p><br></p>`);
+    exec('insertHTML', `<div class="live-range" contenteditable="false" data-range="${choice.range}" data-mode="${choice.mode}" data-sheet="${choice.sheet}">${OpenDesk.renderLive(choice.range, choice.mode, choice.sheet)}</div><p><br></p>`);
   },
   toSlides() {
-    const deck = docToDeck();
-    if (!confirm(`Create a ${deck.slides.length}-slide presentation from this document?\n\nIt replaces the presentation currently open in Slides (the old one stays in Slides → History).`)) return;
-    const old = Store.get('opendesk.slides');
-    if (old?.deck) OpenDesk.pushHistory('opendesk.slides', old, 'Before "Document → Slides"');
-    Store.set('opendesk.slides', { title: titleEl.value, deck });
-    location.href = 'slides.html';
+    // Always a new presentation file, so no existing deck is replaced.
+    const id = Docs.create('slides', { title: titleEl.value, deck: docToDeck() });
+    if (id) location.href = Docs.url('slides', id);
   },
   pagebreak() { exec('insertHTML', '<hr style="page-break-after:always;border:0;border-top:1px dashed #bbb"><p><br></p>'); },
 };
@@ -200,9 +202,14 @@ document.getElementById('saveAs').onchange = e => {
 
 // ---- live spreadsheet blocks ----
 function refreshLive() {
-  const blocks = page.querySelectorAll('.live-range');
-  blocks.forEach(el => { el.contentEditable = 'false'; el.innerHTML = OpenDesk.renderLive(el.dataset.range, el.dataset.mode); });
-  if (blocks.length) save();
+  const before = page.innerHTML;
+  page.querySelectorAll('.live-range').forEach(el => {
+    el.contentEditable = 'false';
+    // Linked sheet not on this device (shared doc): keep the last rendered values.
+    if (el.dataset.sheet && !Docs.meta(el.dataset.sheet)) return;
+    el.innerHTML = OpenDesk.renderLive(el.dataset.range, el.dataset.mode, el.dataset.sheet);
+  });
+  if (page.innerHTML !== before) save();
 }
 OpenDesk.onSheetChange(refreshLive);
 
@@ -220,7 +227,7 @@ function docToDeck() {
   };
   for (const node of page.children) {
     if (/^H[1-3]$/.test(node.tagName)) start(node.innerText.trim() || 'Untitled');
-    else if (node.classList.contains('live-range')) { if (!cur) start(titleEl.value); cur.live.push({ range: node.dataset.range, mode: node.dataset.mode }); }
+    else if (node.classList.contains('live-range')) { if (!cur) start(titleEl.value); cur.live.push({ range: node.dataset.range, mode: node.dataset.mode, sheet: node.dataset.sheet }); }
     else if (node.tagName === 'UL' || node.tagName === 'OL') node.querySelectorAll('li').forEach(li => addBullet(li.innerText));
     else if (node.tagName !== 'TABLE' && node.tagName !== 'HR') addBullet(node.innerText);
   }
@@ -240,7 +247,7 @@ function docToDeck() {
     ]}));
     for (const l of s.live) slides.push({ bg: '#ffffff', items: [
       text(s.title, 60, 40, 840, 80, 36, true, '#222222'),
-      { id: id(), type: 'live', range: l.range, mode: l.mode, x: 120, y: 140, w: 720, h: 360 },
+      { id: id(), type: 'live', range: l.range, mode: l.mode, sheet: l.sheet, x: 120, y: 140, w: 720, h: 360 },
     ]});
   }
   return { slides };
@@ -248,9 +255,11 @@ function docToDeck() {
 
 OpenDesk.setup({
   app: 'writer',
-  key: KEY,
+  key: DOC.key,
+  id: DOC.id,
+  isEmpty: () => !page.innerText.trim() && !page.querySelector('img,table,.live-range'),
   getState: () => ({ title: titleEl.value, html: page.innerHTML }),
-  setState: st => { load(String(st.title || 'Untitled document'), sanitizeHTML(st.html || '')); refreshLive(); },
+  setState: st => { load(String(st.title || 'Untitled document'), st.html); save(); refreshLive(); },
   toText: st => { const d = new DOMParser().parseFromString(sanitizeHTML(st.html || ''), 'text/html'); d.querySelectorAll('.live-range').forEach(n => n.textContent = `[live ${n.dataset.range}]`); d.querySelectorAll('p,div,h1,h2,h3,li,tr,br').forEach(n => n.append('\n')); return ((st.title || '') + '\n\n' + d.body.textContent).replace(/\n{3,}/g, '\n\n'); },
 });
 refreshLive();

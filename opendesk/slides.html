@@ -4,8 +4,10 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>OpenDesk Slides</title>
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icons/icon.svg" type="image/svg+xml">
 <link rel="stylesheet" href="common.css">
-<script src="https://cdn.jsdelivr.net/npm/pptxgenjs@3.12.0/dist/pptxgen.bundle.js"></script>
+<script src="vendor/pptxgen.bundle.js"></script>
 <style>
   header.appbar { background: #c05621; }
   .work { flex: 1; display: flex; min-height: 0; }
@@ -69,7 +71,7 @@
 <script src="sheets-engine.js"></script>
 <script src="features.js"></script>
 <script>
-const KEY = 'opendesk.slides';
+const DOC = Docs.open('slides', { title: 'Untitled presentation', deck: null });
 const W = 960, H = 540;
 const titleEl = document.getElementById('title');
 const stage = document.getElementById('stage');
@@ -88,7 +90,7 @@ const blankSlide = () => ({ bg: '#ffffff', items: [
 let saveTimer;
 function persist() {
   clearTimeout(saveTimer);
-  saveTimer = setTimeout(() => Store.set(KEY, { title: titleEl.value, deck }), 300);
+  saveTimer = setTimeout(() => { if (DOC.id) Docs.save(DOC.id, { title: titleEl.value, deck }); }, 300);
 }
 
 function boxEl(item, editable) {
@@ -99,7 +101,9 @@ function boxEl(item, editable) {
     const img = document.createElement('img'); img.src = item.src; el.appendChild(img);
   } else if (item.type === 'live') {
     el.classList.add('live');
-    el.innerHTML = OpenDesk.renderLive(item.range, item.mode);
+    const rows = OpenDesk.rangeRows(item.range, item.sheet);
+    if (rows) item.rows = rows; // cached so shared decks still show data without the spreadsheet
+    el.innerHTML = OpenDesk.renderLive(item.range, item.mode, item.sheet, item.rows);
   } else {
     el.textContent = item.text;
     Object.assign(el.style, { fontSize: item.size + 'px', color: item.color, fontWeight: item.bold ? '700' : '400', fontFamily: 'Calibri, Carlito, sans-serif' });
@@ -216,17 +220,16 @@ document.getElementById('bg').oninput = e => { deck.slides[cur].bg = e.target.va
 titleEl.addEventListener('input', persist);
 
 const actions = {
-  newDeck() {
-    if (!confirm('Start a new presentation? The current one will be replaced.')) return;
-    deck = { slides: [titleSlide()] }; cur = 0; selId = null; titleEl.value = 'Untitled presentation'; render();
-  },
+  newDeck() { location.href = 'slides.html?new'; },
   async openDeck() {
     const file = await pickFile('.json');
     if (!file) return;
     try {
       const data = JSON.parse(await file.text());
       if (!Array.isArray(data.deck?.slides)) throw new Error();
-      deck = cleanDeck(data.deck); titleEl.value = data.title || 'Untitled presentation'; cur = 0; selId = null; render();
+      // Opened files become a new presentation; the current one is left untouched.
+      const id = Docs.create('slides', { title: String(data.title || 'Untitled presentation'), deck: cleanDeck(data.deck) });
+      if (id) location.href = Docs.url('slides', id);
     } catch { alert('That file is not an OpenDesk presentation.'); }
   },
   saveDeck() {
@@ -243,7 +246,7 @@ const actions = {
       for (const it of s.items) {
         const pos = { x: it.x * k, y: it.y * k, w: it.w * k, h: it.h * k };
         if (it.type === 'live') {
-          const rows = OpenDesk.rangeRows(it.range) || [['']];
+          const rows = OpenDesk.rangeRows(it.range, it.sheet) || it.rows || [['']];
           if (it.mode === 'chart') {
             const { labels, values } = OpenDesk.chartData(rows);
             if (values.length) ps.addChart(pptx.ChartType.bar, [{ name: it.range, labels, values }], { ...pos, showValue: true, chartColors: ['2B6CB0'] });
@@ -284,7 +287,7 @@ const actions = {
   async addLive() {
     const choice = await OpenDesk.askRange();
     if (!choice) return;
-    const it = { id: uid(), type: 'live', range: choice.range, mode: choice.mode, x: 180, y: 120, w: 600, h: 340 };
+    const it = { id: uid(), type: 'live', range: choice.range, mode: choice.mode, sheet: choice.sheet, x: 180, y: 120, w: 600, h: 340 };
     deck.slides[cur].items.push(it); selId = it.id; render();
   },
   delBox() {
@@ -329,6 +332,9 @@ document.addEventListener('keydown', e => {
   } else if (e.key === 'F5') { e.preventDefault(); actions.present(); }
 });
 
+const cleanRows = rows => Array.isArray(rows)
+  ? rows.slice(0, 100).map(r => (Array.isArray(r) ? r.slice(0, 26) : []).map(v => (typeof v === 'number' || typeof v === 'boolean' ? v : String(v ?? ''))))
+  : undefined;
 // Validate decks from files and share links: only known item types, only image data URLs.
 function cleanDeck(d) {
   const num = (v, def) => (Number.isFinite(+v) ? +v : def);
@@ -338,7 +344,7 @@ function cleanDeck(d) {
     items: (Array.isArray(s?.items) ? s.items : []).map(it => {
       const base = { id: uid(), x: num(it.x, 100), y: num(it.y, 100), w: num(it.w, 300), h: num(it.h, 100) };
       if (it.type === 'image' && /^data:image\/(png|jpe?g|gif|webp);/.test(it.src)) return { ...base, type: 'image', src: it.src };
-      if (it.type === 'live' && /^[A-Z]\d{1,3}(:[A-Z]\d{1,3})?$/.test(it.range)) return { ...base, type: 'live', range: it.range, mode: it.mode === 'chart' ? 'chart' : 'table' };
+      if (it.type === 'live' && /^[A-Z]\d{1,3}(:[A-Z]\d{1,3})?$/.test(it.range)) return { ...base, type: 'live', range: it.range, mode: it.mode === 'chart' ? 'chart' : 'table', sheet: /^[a-z0-9]{1,40}$/.test(it.sheet) ? it.sheet : undefined, rows: cleanRows(it.rows) };
       if (it.type === 'text') return { ...base, type: 'text', text: String(it.text ?? ''), size: num(it.size, 24), color: color(it.color, '#222222'), bold: !!it.bold };
       return null;
     }).filter(Boolean),
@@ -346,14 +352,15 @@ function cleanDeck(d) {
   return { slides: slides.length ? slides : [titleSlide()] };
 }
 
-const saved = Store.get(KEY);
-deck = saved?.deck?.slides?.length ? cleanDeck(saved.deck) : { slides: [titleSlide()] };
-if (saved?.title) titleEl.value = saved.title;
-render();
+deck = DOC.state.deck?.slides?.length ? cleanDeck(DOC.state.deck) : { slides: [titleSlide()] };
+titleEl.value = String(DOC.state.title || 'Untitled presentation');
+renderStage(); renderThumbs(); // no persist: just opening a file shouldn't mark it modified
 OpenDesk.onSheetChange(() => { if (deck.slides.some(s => s.items.some(i => i.type === 'live'))) render(); });
 OpenDesk.setup({
   app: 'slides',
-  key: KEY,
+  key: DOC.key,
+  id: DOC.id,
+  isEmpty: () => JSON.stringify(deck.slides.map(s => s.items.map(i => i.text))) === JSON.stringify([titleSlide().items.map(i => i.text)]),
   getState: () => ({ title: titleEl.value, deck }),
   setState: st => { deck = cleanDeck(st.deck); titleEl.value = String(st.title || 'Untitled presentation'); cur = 0; selId = null; render(); },
   toText: st => (st.title || '') + '\n\n' + (st.deck?.slides || []).map((s, i) =>

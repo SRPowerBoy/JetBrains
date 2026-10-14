@@ -4,8 +4,10 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>OpenDesk Sheets</title>
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icons/icon.svg" type="image/svg+xml">
 <link rel="stylesheet" href="common.css">
-<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<script src="vendor/xlsx.full.min.js"></script>
 <style>
   header.appbar { background: #2f855a; }
   .fbar { display: flex; gap: 8px; align-items: center; padding: 6px 16px; background: var(--panel); border-bottom: 1px solid var(--border); }
@@ -47,7 +49,8 @@
 <script src="sheets-engine.js"></script>
 <script src="features.js"></script>
 <script>
-const ROWS = 100, COLS = 26, KEY = 'opendesk.sheets';
+const ROWS = 100, COLS = 26;
+const DOC = Docs.open('sheets', { title: 'Untitled spreadsheet', raw: {}, bold: {} });
 const { computeAll, colName } = SheetEngine;
 let raw = {}, bold = {}, sel = 'A1';
 const grid = document.getElementById('grid');
@@ -87,7 +90,7 @@ function render() {
 let saveTimer;
 function persist() {
   clearTimeout(saveTimer);
-  saveTimer = setTimeout(() => Store.set(KEY, { title: titleEl.value, raw, bold }), 100);
+  saveTimer = setTimeout(() => { if (DOC.id) Docs.save(DOC.id, { title: titleEl.value, raw, bold }); }, 100);
 }
 
 function setCell(id, value) {
@@ -145,10 +148,7 @@ formula.addEventListener('keydown', e => {
 formula.addEventListener('change', () => setCell(sel, formula.value));
 titleEl.addEventListener('input', persist);
 
-document.getElementById('newBtn').onclick = () => {
-  if (!confirm('Start a new spreadsheet? Current data will be replaced.')) return;
-  raw = {}; bold = {}; titleEl.value = 'Untitled spreadsheet'; render(); persist(); select('A1');
-};
+document.getElementById('newBtn').onclick = () => { location.href = 'sheets.html?new'; };
 document.getElementById('boldBtn').onclick = () => {
   bold[sel] = !bold[sel]; if (!bold[sel]) delete bold[sel]; render(); persist();
 };
@@ -166,17 +166,18 @@ document.getElementById('openBtn').onclick = async () => {
   if (!window.XLSX) return alert('The spreadsheet importer failed to load (are you offline?).');
   const wb = XLSX.read(await file.arrayBuffer());
   const ws = wb.Sheets[wb.SheetNames[0]];
-  raw = {}; bold = {};
+  const imported = {};
   for (const addr in ws) {
     if (addr[0] === '!') continue;
     const m = /^([A-Z])(\d+)$/.exec(addr);
     if (!m || parseInt(m[2], 10) > ROWS) continue; // outside our A1:Z100 grid
     const cell = ws[addr];
-    raw[addr] = cell.f ? '=' + cell.f : String(cell.v ?? '');
+    imported[addr] = cell.f ? '=' + cell.f : String(cell.v ?? '');
   }
-  titleEl.value = file.name.replace(/\.[^.]+$/, '');
   if (wb.SheetNames.length > 1) alert(`Opened the first sheet ("${wb.SheetNames[0]}") only — multiple sheets aren't supported yet.`);
-  render(); persist(); select('A1');
+  // Opened files become a new spreadsheet; the current one is left untouched.
+  const id = Docs.create('sheets', { title: file.name.replace(/\.[^.]+$/, ''), raw: imported, bold: {} });
+  if (id) location.href = Docs.url('sheets', id);
 };
 
 function buildSheet() {
@@ -216,21 +217,22 @@ document.getElementById('csvBtn').onclick = () => {
   download(safeName(titleEl.value, 'spreadsheet') + '.csv', lines.join('\n'), 'text/csv');
 };
 
-const saved = Store.get(KEY);
-if (saved) { raw = saved.raw || {}; bold = saved.bold || {}; titleEl.value = saved.title || titleEl.value; }
-render(); select('A1');
-
 const validRaw = obj => Object.fromEntries(Object.entries(obj || {})
   .filter(([k, v]) => /^[A-Z]\d{1,3}$/.test(k) && typeof v === 'string'));
+raw = validRaw(DOC.state.raw); bold = DOC.state.bold || {};
+titleEl.value = String(DOC.state.title || 'Untitled spreadsheet');
+render(); select('A1');
 OpenDesk.setup({
   app: 'sheets',
-  key: KEY,
+  key: DOC.key,
+  id: DOC.id,
+  isEmpty: () => !Object.keys(raw).length,
   getState: () => ({ title: titleEl.value, raw, bold }),
   setState: st => {
     raw = validRaw(st.raw); bold = {};
     for (const k in st.bold || {}) if (k in raw) bold[k] = true;
     titleEl.value = String(st.title || 'Untitled spreadsheet');
-    Store.set(KEY, { title: titleEl.value, raw, bold });
+    persist();
     render(); select('A1');
   },
   toText: st => (st.title || '') + '\n\n' + Object.keys(st.raw || {})

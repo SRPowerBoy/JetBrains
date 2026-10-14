@@ -4,28 +4,158 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>OpenDesk</title>
+<meta name="description" content="Free, open-source office suite that runs entirely in your browser.">
+<meta name="theme-color" content="#2b6cb0">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icons/icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="icons/icon-192.png">
 <link rel="stylesheet" href="common.css">
 <style>
-  main { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 24px 16px; }
-  h1 { margin: 0 0 4px; font-size: 32px; }
-  p.lead { color: var(--muted); margin: 0 0 32px; text-align: center; }
-  .apps { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 16px; width: 100%; max-width: 720px; }
-  .app { display: block; padding: 24px; border-radius: 10px; background: var(--panel); border: 1px solid var(--border); color: var(--text); text-decoration: none; }
-  .app:hover { border-color: var(--accent); }
-  .app .icon { width: 44px; height: 44px; border-radius: 8px; display: grid; place-items: center; color: #fff; font-weight: 700; font-size: 20px; margin-bottom: 12px; }
-  .app h2 { margin: 0 0 4px; font-size: 18px; }
-  .app span { color: var(--muted); font-size: 13px; }
+  main { flex: 1; width: 100%; max-width: 880px; margin: 0 auto; padding: 32px 16px; display: flex; flex-direction: column; gap: 24px; }
+  h1 { margin: 0; font-size: 28px; }
+  p.lead { color: var(--muted); margin: 4px 0 0; }
+  .new { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px; }
+  .new a { display: flex; align-items: center; gap: 12px; padding: 14px; border-radius: 10px; background: var(--panel); border: 1px solid var(--border); color: var(--text); text-decoration: none; }
+  .new a:hover { border-color: var(--accent); }
+  .icon { width: 36px; height: 36px; border-radius: 8px; display: grid; place-items: center; color: #fff; font-weight: 700; flex-shrink: 0; }
+  .icon.writer { background: #2b6cb0; } .icon.sheets { background: #2f855a; } .icon.slides { background: #c05621; }
+  .new strong { display: block; } .new span { font-size: 12px; color: var(--muted); }
+  .files-head { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
+  .files-head h2 { margin: 0; font-size: 18px; flex: 1; }
+  .files-head input, .files-head select { font: inherit; padding: 6px 10px; border: 1px solid var(--border); border-radius: 6px; background: var(--panel); color: var(--text); }
+  .files-head input { width: 220px; max-width: 100%; }
+  ul.files { list-style: none; margin: 0; padding: 0; background: var(--panel); border: 1px solid var(--border); border-radius: 10px; overflow: hidden; }
+  ul.files li { display: flex; align-items: center; gap: 12px; padding: 10px 12px; border-top: 1px solid var(--border); }
+  ul.files li:first-child { border-top: 0; }
+  ul.files li:hover { background: var(--hover); }
+  ul.files a { flex: 1; min-width: 0; color: var(--text); text-decoration: none; display: flex; flex-direction: column; }
+  ul.files a strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  ul.files a span { font-size: 12px; color: var(--muted); }
+  ul.files .icon { width: 28px; height: 28px; font-size: 13px; border-radius: 6px; }
+  .empty { padding: 24px; text-align: center; color: var(--muted); }
+  footer.bar { display: flex; flex-wrap: wrap; gap: 8px 16px; align-items: center; font-size: 13px; color: var(--muted); }
+  .meter { width: 140px; height: 6px; background: var(--border); border-radius: 3px; overflow: hidden; display: inline-block; vertical-align: middle; }
+  .meter i { display: block; height: 100%; background: var(--accent); }
+  footer.bar .spacer { flex: 1; }
 </style>
 </head>
 <body>
 <main>
-  <h1>OpenDesk</h1>
-  <p class="lead">Free, open-source office suite. Runs entirely in your browser — no account, no server, your files stay on your device.</p>
-  <div class="apps">
-    <a class="app" href="writer.html"><div class="icon" style="background:#2b6cb0">W</div><h2>Writer</h2><span>Documents · opens .docx</span></a>
-    <a class="app" href="sheets.html"><div class="icon" style="background:#2f855a">S</div><h2>Sheets</h2><span>Spreadsheets · .xlsx / .csv</span></a>
-    <a class="app" href="slides.html"><div class="icon" style="background:#c05621">P</div><h2>Slides</h2><span>Presentations · exports .pptx</span></a>
+  <div>
+    <h1>OpenDesk</h1>
+    <p class="lead">Free, open-source office suite. Runs entirely in your browser — no account, no server, your files stay on this device.</p>
   </div>
+  <div class="new">
+    <a href="writer.html?new"><div class="icon writer">W</div><div><strong>New document</strong><span>Writer · opens .docx</span></div></a>
+    <a href="sheets.html?new"><div class="icon sheets">S</div><div><strong>New spreadsheet</strong><span>Sheets · .xlsx / .csv</span></div></a>
+    <a href="slides.html?new"><div class="icon slides">P</div><div><strong>New presentation</strong><span>Slides · exports .pptx</span></div></a>
+  </div>
+  <section>
+    <div class="files-head">
+      <h2>Your files</h2>
+      <select id="filter" aria-label="Filter by type"><option value="">All types</option><option value="writer">Documents</option><option value="sheets">Spreadsheets</option><option value="slides">Presentations</option></select>
+      <input id="search" type="search" placeholder="Search files…" aria-label="Search files">
+    </div>
+    <ul class="files" id="files" style="margin-top:12px"></ul>
+  </section>
+  <footer class="bar">
+    <span>Storage: <span class="meter"><i id="meterFill"></i></span> <span id="meterText"></span></span>
+    <span id="offline"></span>
+    <span class="spacer"></span>
+    <button id="backup" title="Download every file as one backup file">Back up all files</button>
+    <button id="restore" title="Restore files from a backup">Restore backup</button>
+  </footer>
 </main>
+<script src="common.js"></script>
+<script>
+const APP = { writer: ['W', 'Document'], sheets: ['S', 'Spreadsheet'], slides: ['P', 'Presentation'] };
+const filesEl = document.getElementById('files');
+const esc = s => String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+
+function when(t) {
+  const s = (Date.now() - t) / 1000;
+  if (s < 60) return 'just now';
+  if (s < 3600) return Math.floor(s / 60) + ' min ago';
+  if (s < 86400) return Math.floor(s / 3600) + ' h ago';
+  return new Date(t).toLocaleDateString();
+}
+
+function renderFiles() {
+  const q = document.getElementById('search').value.trim().toLowerCase();
+  const type = document.getElementById('filter').value;
+  const files = Docs.list(type).filter(d => APP[d.app] && (!q || d.title.toLowerCase().includes(q)));
+  if (!files.length) {
+    filesEl.innerHTML = `<li class="empty">${Docs.all().length ? 'No files match.' : 'No files yet — create one above, or open a .docx/.xlsx from inside an app.'}</li>`;
+  } else {
+    filesEl.innerHTML = files.map(d => `<li>
+      <div class="icon ${d.app}">${APP[d.app][0]}</div>
+      <a href="${Docs.url(d.app, d.id)}"><strong>${esc(d.title)}</strong><span>${APP[d.app][1]} · edited ${when(d.updated)}</span></a>
+      <button data-dup="${esc(d.id)}" title="Make a copy">Copy</button>
+      <button data-del="${esc(d.id)}" title="Delete">Delete</button></li>`).join('');
+  }
+  updateMeter();
+}
+
+function updateMeter() {
+  let chars = 0;
+  try { for (let i = 0; i < localStorage.length; i++) { const k = localStorage.key(i); chars += k.length + (localStorage.getItem(k) || '').length; } } catch { /* unavailable */ }
+  const mb = chars * 2 / 1048576, cap = 5; // browsers allow ~5 MB (UTF-16) per site for localStorage
+  document.getElementById('meterFill').style.width = Math.min(100, mb / cap * 100) + '%';
+  document.getElementById('meterText').textContent = `${mb.toFixed(1)} of ~${cap} MB`;
+}
+
+filesEl.addEventListener('click', e => {
+  const dup = e.target.dataset.dup, del = e.target.dataset.del;
+  if (dup) {
+    const meta = Docs.meta(dup), state = Docs.get(dup);
+    if (meta && state) Docs.create(meta.app, { ...state, title: state.title + ' (copy)' });
+    renderFiles();
+  } else if (del) {
+    const meta = Docs.meta(del);
+    if (meta && confirm(`Delete "${meta.title}" and its version history? This can't be undone.\n\nTip: "Back up all files" first if you're unsure.`)) { Docs.remove(del); renderFiles(); }
+  }
+});
+document.getElementById('search').oninput = renderFiles;
+document.getElementById('filter').onchange = renderFiles;
+addEventListener('storage', renderFiles);
+addEventListener('pageshow', renderFiles);
+
+document.getElementById('backup').onclick = () => {
+  const files = Docs.all().map(meta => ({ meta, state: Docs.get(meta.id) })).filter(f => f.state);
+  download(`opendesk-backup-${new Date().toISOString().slice(0, 10)}.json`, JSON.stringify({ opendeskBackup: 1, files }), 'application/json');
+};
+document.getElementById('restore').onclick = async () => {
+  const file = await pickFile('.json');
+  if (!file) return;
+  let data;
+  try { data = JSON.parse(await file.text()); if (!Array.isArray(data.files)) throw 0; }
+  catch { return alert('That is not an OpenDesk backup file.'); }
+  let added = 0, skipped = 0;
+  const index = Docs.all();
+  for (const f of data.files) {
+    const id = String(f.meta?.id || ''), app = f.meta?.app;
+    if (!APP[app] || !f.state || !/^[a-z0-9]{1,40}$/.test(id)) { skipped++; continue; }
+    if (Docs.meta(id)) { skipped++; continue; } // already have this exact file
+    if (!Store.set(Docs.key(id), f.state)) { alert('Storage is full — restored ' + added + ' files before running out of space.'); break; }
+    index.push({ id, app, title: String(f.state.title || f.meta.title || 'Untitled'), updated: +f.meta.updated || Date.now() });
+    added++;
+  }
+  Store.set(Docs.INDEX, index);
+  alert(`Restored ${added} file(s).` + (skipped ? ` Skipped ${skipped} (already here or invalid).` : ''));
+  renderFiles();
+};
+
+// Ask the browser not to evict our storage under pressure (granted silently in most browsers once installed/used).
+navigator.storage?.persist?.().catch(() => {});
+
+const offlineEl = document.getElementById('offline');
+if ('serviceWorker' in navigator && /^https?:$/.test(location.protocol)) {
+  navigator.serviceWorker.ready.then(() => { offlineEl.textContent = '✓ Works offline'; });
+}
+
+// Pre-multi-file data is migrated when its app is first opened; show it here too.
+Object.keys(APP).forEach(app => Docs.migrate(app));
+renderFiles();
+</script>
 </body>
 </html>
