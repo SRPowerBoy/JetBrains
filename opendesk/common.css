@@ -1,0 +1,52 @@
+:root {
+  --bg: #f3f3f3;
+  --panel: #ffffff;
+  --text: #1f1f1f;
+  --muted: #666;
+  --border: #d4d4d4;
+  --accent: #2b6cb0;
+  --accent-text: #fff;
+  --hover: #e8eef6;
+  --page: #ffffff;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #1e1f22; --panel: #2b2d30; --text: #dfe1e5; --muted: #9a9da3;
+    --border: #43454a; --accent: #4a8fe0; --hover: #36393e; --page: #ffffff;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #1e1f22; --panel: #2b2d30; --text: #dfe1e5; --muted: #9a9da3;
+  --border: #43454a; --accent: #4a8fe0; --hover: #36393e; --page: #ffffff;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; height: 100%; }
+body {
+  background: var(--bg); color: var(--text);
+  font: 14px/1.4 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  display: flex; flex-direction: column;
+}
+header.appbar {
+  display: flex; align-items: center; gap: 12px;
+  padding: 8px 16px; background: var(--accent); color: var(--accent-text);
+}
+header.appbar a { color: inherit; text-decoration: none; font-weight: 600; }
+header.appbar input.title {
+  background: transparent; border: 1px solid transparent; color: inherit;
+  font: inherit; padding: 2px 6px; border-radius: 4px; min-width: 0; flex: 1; max-width: 320px;
+}
+header.appbar input.title:focus { border-color: rgba(255,255,255,.6); outline: none; }
+.toolbar {
+  display: flex; flex-wrap: wrap; gap: 4px; align-items: center;
+  padding: 6px 16px; background: var(--panel); border-bottom: 1px solid var(--border);
+}
+.toolbar .sep { width: 1px; height: 22px; background: var(--border); margin: 0 4px; }
+button, select, .btn {
+  font: inherit; color: var(--text); background: transparent;
+  border: 1px solid transparent; border-radius: 4px; padding: 4px 8px; cursor: pointer;
+}
+button:hover, .btn:hover { background: var(--hover); border-color: var(--border); }
+select { border-color: var(--border); background: var(--panel); }
+input[type="color"] { width: 28px; height: 24px; padding: 0; border: 1px solid var(--border); background: none; }
+.status { padding: 4px 16px; font-size: 12px; color: var(--muted); background: var(--panel); border-top: 1px solid var(--border); }
+.hidden { display: none !important; }

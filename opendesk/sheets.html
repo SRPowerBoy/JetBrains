@@ -1,0 +1,222 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>OpenDesk Sheets</title>
+<link rel="stylesheet" href="common.css">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<style>
+  header.appbar { background: #2f855a; }
+  .fbar { display: flex; gap: 8px; align-items: center; padding: 6px 16px; background: var(--panel); border-bottom: 1px solid var(--border); }
+  .fbar #cellName { width: 56px; font-weight: 600; text-align: center; color: var(--muted); }
+  .fbar input { flex: 1; font: 13px ui-monospace, Consolas, monospace; padding: 4px 6px; border: 1px solid var(--border); background: var(--panel); color: var(--text); border-radius: 4px; }
+  .grid-wrap { flex: 1; overflow: auto; background: var(--panel); }
+  table { border-collapse: collapse; table-layout: fixed; }
+  th { position: sticky; top: 0; background: var(--bg); color: var(--muted); font-weight: 500; font-size: 12px; border: 1px solid var(--border); height: 22px; z-index: 1; }
+  th.rh { position: sticky; left: 0; width: 44px; z-index: 2; }
+  thead th.rh { z-index: 3; }
+  td { border: 1px solid var(--border); padding: 0; width: 100px; height: 22px; }
+  td input { width: 100%; height: 100%; border: 0; padding: 0 4px; font: 13px system-ui, sans-serif; background: transparent; color: var(--text); outline: none; }
+  td input.num { text-align: right; }
+  td input.err { color: #e53e3e; }
+  td input.bold { font-weight: 700; }
+  td.sel { outline: 2px solid #2f855a; outline-offset: -2px; }
+</style>
+</head>
+<body>
+<header class="appbar">
+  <a href="index.html">OpenDesk Sheets</a>
+  <input class="title" id="title" value="Untitled spreadsheet" aria-label="Spreadsheet title">
+</header>
+<div class="toolbar">
+  <button id="newBtn">New</button>
+  <button id="openBtn" title="Open .xlsx, .xls, .ods or .csv">Open</button>
+  <button id="xlsxBtn">Save .xlsx</button>
+  <button id="csvBtn">Save .csv</button>
+  <span class="sep"></span>
+  <button id="boldBtn" title="Bold"><b>B</b></button>
+  <button id="sumBtn" title="Insert SUM of the cells above">Σ AutoSum</button>
+  <button id="clearBtn" title="Clear cell">Clear</button>
+</div>
+<div class="fbar"><span id="cellName">A1</span><span>ƒx</span><input id="formula" aria-label="Formula bar" spellcheck="false"></div>
+<div class="grid-wrap"><table id="grid"></table></div>
+<div class="status" id="status">Formulas: SUM AVERAGE MIN MAX COUNT COUNTA ROUND ABS SQRT POWER MOD IF AND OR NOT CONCAT LEN UPPER LOWER TODAY</div>
+
+<script src="common.js"></script>
+<script src="sheets-engine.js"></script>
+<script>
+const ROWS = 100, COLS = 26, KEY = 'opendesk.sheets';
+const { computeAll, colName } = SheetEngine;
+let raw = {}, bold = {}, sel = 'A1';
+const grid = document.getElementById('grid');
+const formula = document.getElementById('formula');
+const titleEl = document.getElementById('title');
+const inputs = {};
+
+// Build grid.
+let html = '<thead><tr><th class="rh"></th>';
+for (let c = 0; c < COLS; c++) html += `<th>${colName(c)}</th>`;
+html += '</tr></thead><tbody>';
+for (let r = 1; r <= ROWS; r++) {
+  html += `<tr><th class="rh">${r}</th>`;
+  for (let c = 0; c < COLS; c++) html += `<td><input data-id="${colName(c)}${r}" aria-label="${colName(c)}${r}"></td>`;
+  html += '</tr>';
+}
+grid.innerHTML = html + '</tbody>';
+grid.querySelectorAll('input').forEach(i => inputs[i.dataset.id] = i);
+
+function fmt(v) {
+  if (typeof v === 'number') return Number.isInteger(v) ? String(v) : String(+v.toPrecision(10));
+  if (typeof v === 'boolean') return v ? 'TRUE' : 'FALSE';
+  return v == null ? '' : String(v);
+}
+
+function render() {
+  const values = computeAll(raw);
+  for (const id in inputs) {
+    const inp = inputs[id];
+    if (document.activeElement === inp) continue;
+    const v = values[id];
+    inp.value = fmt(v);
+    inp.className = (typeof v === 'number' ? 'num' : '') + (typeof v === 'string' && /^#[A-Z/0]+[!?]$/.test(v) ? ' err' : '') + (bold[id] ? ' bold' : '');
+  }
+}
+
+let saveTimer;
+function persist() {
+  clearTimeout(saveTimer);
+  saveTimer = setTimeout(() => Store.set(KEY, { title: titleEl.value, raw, bold }), 300);
+}
+
+function setCell(id, value) {
+  if (value === '') delete raw[id]; else raw[id] = value;
+  render(); persist();
+}
+
+function select(id) {
+  document.querySelector('td.sel')?.classList.remove('sel');
+  sel = id;
+  inputs[id].parentElement.classList.add('sel');
+  document.getElementById('cellName').textContent = id;
+  formula.value = raw[id] ?? '';
+}
+
+function move(id, dr, dc) {
+  const c = Math.min(COLS - 1, Math.max(0, id.charCodeAt(0) - 65 + dc));
+  const r = Math.min(ROWS, Math.max(1, parseInt(id.slice(1), 10) + dr));
+  inputs[colName(c) + r].focus();
+}
+
+grid.addEventListener('focusin', e => {
+  const id = e.target.dataset.id; if (!id) return;
+  select(id);
+  e.target.value = raw[id] ?? '';
+  e.target.classList.remove('num', 'err');
+});
+grid.addEventListener('focusout', e => {
+  const id = e.target.dataset.id; if (!id) return;
+  const value = e.target.value;
+  if ((raw[id] ?? '') !== value) setCell(id, value);
+  else render();
+  // Re-render the blurred cell itself (render() skips the focused element).
+  requestAnimationFrame(render);
+});
+grid.addEventListener('input', e => { if (e.target.dataset.id) formula.value = e.target.value; });
+grid.addEventListener('keydown', e => {
+  const id = e.target.dataset.id; if (!id) return;
+  const atStart = e.target.selectionStart === 0 && e.target.selectionEnd === 0;
+  const atEnd = e.target.selectionStart === e.target.value.length;
+  if (e.key === 'Enter') { e.preventDefault(); move(id, e.shiftKey ? -1 : 1, 0); }
+  else if (e.key === 'Tab') { e.preventDefault(); move(id, 0, e.shiftKey ? -1 : 1); }
+  else if (e.key === 'ArrowUp') { e.preventDefault(); move(id, -1, 0); }
+  else if (e.key === 'ArrowDown') { e.preventDefault(); move(id, 1, 0); }
+  else if (e.key === 'ArrowLeft' && atStart) { e.preventDefault(); move(id, 0, -1); }
+  else if (e.key === 'ArrowRight' && atEnd) { e.preventDefault(); move(id, 0, 1); }
+  else if (e.key === 'Escape') { e.target.value = raw[id] ?? ''; e.target.blur(); }
+});
+
+formula.addEventListener('input', () => { inputs[sel].value = formula.value; });
+formula.addEventListener('keydown', e => {
+  if (e.key === 'Enter') { setCell(sel, formula.value); move(sel, 1, 0); }
+});
+formula.addEventListener('change', () => setCell(sel, formula.value));
+titleEl.addEventListener('input', persist);
+
+document.getElementById('newBtn').onclick = () => {
+  if (!confirm('Start a new spreadsheet? Current data will be replaced.')) return;
+  raw = {}; bold = {}; titleEl.value = 'Untitled spreadsheet'; render(); persist(); select('A1');
+};
+document.getElementById('boldBtn').onclick = () => {
+  bold[sel] = !bold[sel]; if (!bold[sel]) delete bold[sel]; render(); persist();
+};
+document.getElementById('clearBtn').onclick = () => { setCell(sel, ''); formula.value = ''; };
+document.getElementById('sumBtn').onclick = () => {
+  const col = sel[0], row = parseInt(sel.slice(1), 10);
+  let top = row - 1;
+  while (top > 1 && raw[col + (top - 1)] != null) top--;
+  if (row > 1) { setCell(sel, `=SUM(${col}${top}:${col}${row - 1})`); select(sel); }
+};
+
+document.getElementById('openBtn').onclick = async () => {
+  const file = await pickFile('.xlsx,.xls,.ods,.csv');
+  if (!file) return;
+  if (!window.XLSX) return alert('The spreadsheet importer failed to load (are you offline?).');
+  const wb = XLSX.read(await file.arrayBuffer());
+  const ws = wb.Sheets[wb.SheetNames[0]];
+  raw = {}; bold = {};
+  for (const addr in ws) {
+    if (addr[0] === '!') continue;
+    const m = /^([A-Z])(\d+)$/.exec(addr);
+    if (!m || parseInt(m[2], 10) > ROWS) continue; // outside our A1:Z100 grid
+    const cell = ws[addr];
+    raw[addr] = cell.f ? '=' + cell.f : String(cell.v ?? '');
+  }
+  titleEl.value = file.name.replace(/\.[^.]+$/, '');
+  if (wb.SheetNames.length > 1) alert(`Opened the first sheet ("${wb.SheetNames[0]}") only — multiple sheets aren't supported yet.`);
+  render(); persist(); select('A1');
+};
+
+function buildSheet() {
+  const values = computeAll(raw);
+  const ws = {};
+  let maxR = 0, maxC = 0;
+  for (const id in raw) {
+    const c = id.charCodeAt(0) - 65, r = parseInt(id.slice(1), 10) - 1;
+    maxR = Math.max(maxR, r); maxC = Math.max(maxC, c);
+    const v = values[id];
+    const cell = typeof v === 'number' ? { t: 'n', v } : typeof v === 'boolean' ? { t: 'b', v } : { t: 's', v: String(v) };
+    if (raw[id][0] === '=') cell.f = raw[id].slice(1);
+    ws[id] = cell;
+  }
+  ws['!ref'] = `A1:${colName(maxC)}${maxR + 1}`;
+  return ws;
+}
+document.getElementById('xlsxBtn').onclick = () => {
+  if (!window.XLSX) return alert('The spreadsheet exporter failed to load (are you offline?).');
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, buildSheet(), 'Sheet1');
+  XLSX.writeFile(wb, safeName(titleEl.value, 'spreadsheet') + '.xlsx');
+};
+document.getElementById('csvBtn').onclick = () => {
+  const values = computeAll(raw);
+  let maxR = 0, maxC = 0;
+  for (const id in raw) { maxR = Math.max(maxR, parseInt(id.slice(1), 10)); maxC = Math.max(maxC, id.charCodeAt(0) - 64); }
+  const lines = [];
+  for (let r = 1; r <= maxR; r++) {
+    const row = [];
+    for (let c = 0; c < maxC; c++) {
+      const s = fmt(values[colName(c) + r]);
+      row.push(/[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s);
+    }
+    lines.push(row.join(','));
+  }
+  download(safeName(titleEl.value, 'spreadsheet') + '.csv', lines.join('\n'), 'text/csv');
+};
+
+const saved = Store.get(KEY);
+if (saved) { raw = saved.raw || {}; bold = saved.bold || {}; titleEl.value = saved.title || titleEl.value; }
+render(); select('A1');
+</script>
+</body>
+</html>

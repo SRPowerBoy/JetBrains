@@ -1,0 +1,314 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>OpenDesk Slides</title>
+<link rel="stylesheet" href="common.css">
+<script src="https://cdn.jsdelivr.net/npm/pptxgenjs@3.12.0/dist/pptxgen.bundle.js"></script>
+<style>
+  header.appbar { background: #c05621; }
+  .work { flex: 1; display: flex; min-height: 0; }
+  #thumbs { width: 180px; overflow-y: auto; padding: 12px; background: var(--panel); border-right: 1px solid var(--border); display: flex; flex-direction: column; gap: 10px; }
+  .thumb { position: relative; width: 100%; aspect-ratio: 16/9; border: 2px solid var(--border); border-radius: 4px; overflow: hidden; cursor: pointer; flex-shrink: 0; }
+  .thumb.active { border-color: #c05621; }
+  .thumb .n { position: absolute; left: 4px; top: 2px; font-size: 11px; color: #888; z-index: 1; }
+  .thumb .mini { position: absolute; left: 0; top: 0; width: 960px; height: 540px; transform-origin: 0 0; pointer-events: none; }
+  #stageWrap { flex: 1; display: grid; place-items: center; overflow: hidden; padding: 16px; }
+  .slide { position: relative; width: 960px; height: 540px; background: #fff; overflow: hidden; }
+  #stage { box-shadow: 0 2px 8px rgba(0,0,0,.3); transform-origin: center; flex-shrink: 0; }
+  .box { position: absolute; padding: 6px; border: 1px dashed transparent; outline: none; white-space: pre-wrap; word-wrap: break-word; line-height: 1.2; }
+  #stage .box:hover { border-color: #aaa; }
+  #stage .box.selected { border: 1px solid #c05621; resize: both; overflow: hidden; }
+  .box img { width: 100%; height: 100%; object-fit: contain; pointer-events: none; }
+  /* Inside the box: .selected uses overflow:hidden (required by resize), which would clip an outside handle. */
+  .handle { position: absolute; top: 0; right: 0; height: 18px; line-height: 18px; padding: 0 6px; font: 11px system-ui, sans-serif; font-weight: 400; background: #c05621; color: #fff; cursor: move; border-radius: 0 0 0 3px; user-select: none; }
+  #present { position: fixed; inset: 0; background: #000; display: grid; place-items: center; z-index: 10; cursor: none; }
+  #present .slide { transform-origin: center; }
+  @media (max-width: 640px) { #thumbs { width: 96px; padding: 6px; } }
+</style>
+</head>
+<body>
+<header class="appbar">
+  <a href="index.html">OpenDesk Slides</a>
+  <input class="title" id="title" value="Untitled presentation" aria-label="Presentation title">
+</header>
+<div class="toolbar">
+  <button data-act="newDeck">New</button>
+  <button data-act="openDeck" title="Open an OpenDesk .json deck">Open</button>
+  <button data-act="saveDeck" title="Save as editable OpenDesk .json">Save</button>
+  <button data-act="exportPptx">Export .pptx</button>
+  <span class="sep"></span>
+  <button data-act="addSlide">+ Slide</button>
+  <button data-act="dupSlide">Duplicate</button>
+  <button data-act="delSlide">Delete slide</button>
+  <span class="sep"></span>
+  <button data-act="addText">Text box</button>
+  <button data-act="addImage">Image</button>
+  <button data-act="delBox">Delete box</button>
+  <select id="fsize" aria-label="Font size"><option>14</option><option>18</option><option selected>24</option><option>32</option><option>44</option><option>60</option></select>
+  <button data-act="bold"><b>B</b></button>
+  <input type="color" id="fcolor" title="Text color" value="#222222">
+  <label title="Slide background">BG <input type="color" id="bg" value="#ffffff"></label>
+  <span class="sep"></span>
+  <button data-act="present">▶ Present</button>
+</div>
+<div class="work">
+  <div id="thumbs"></div>
+  <div id="stageWrap"><div id="stage" class="slide"></div></div>
+</div>
+<div class="status" id="status"></div>
+<div id="present" class="hidden"></div>
+
+<script src="common.js"></script>
+<script>
+const KEY = 'opendesk.slides';
+const W = 960, H = 540;
+const titleEl = document.getElementById('title');
+const stage = document.getElementById('stage');
+let deck, cur = 0, selId = null, presentIdx = 0;
+
+const uid = () => Math.random().toString(36).slice(2, 10);
+const titleSlide = () => ({ bg: '#ffffff', items: [
+  { id: uid(), type: 'text', x: 80, y: 170, w: 800, h: 100, text: 'Click to edit title', size: 44, color: '#222222', bold: true },
+  { id: uid(), type: 'text', x: 80, y: 290, w: 800, h: 60, text: 'Subtitle', size: 24, color: '#555555', bold: false },
+]});
+const blankSlide = () => ({ bg: '#ffffff', items: [
+  { id: uid(), type: 'text', x: 60, y: 40, w: 840, h: 80, text: 'Slide title', size: 36, color: '#222222', bold: true },
+  { id: uid(), type: 'text', x: 60, y: 140, w: 840, h: 340, text: '• Point one\n• Point two', size: 24, color: '#333333', bold: false },
+]});
+
+let saveTimer;
+function persist() {
+  clearTimeout(saveTimer);
+  saveTimer = setTimeout(() => Store.set(KEY, { title: titleEl.value, deck }), 300);
+}
+
+function boxEl(item, editable) {
+  const el = document.createElement('div');
+  el.className = 'box';
+  Object.assign(el.style, { left: item.x + 'px', top: item.y + 'px', width: item.w + 'px', height: item.h + 'px' });
+  if (item.type === 'image') {
+    const img = document.createElement('img'); img.src = item.src; el.appendChild(img);
+  } else {
+    el.textContent = item.text;
+    Object.assign(el.style, { fontSize: item.size + 'px', color: item.color, fontWeight: item.bold ? '700' : '400', fontFamily: 'Calibri, Carlito, sans-serif' });
+    if (editable) el.contentEditable = 'plaintext-only';
+  }
+  return el;
+}
+
+function renderSlideInto(container, slide, editable) {
+  container.innerHTML = '';
+  container.style.background = slide.bg;
+  for (const item of slide.items) {
+    const el = boxEl(item, editable);
+    el.dataset.id = item.id;
+    container.appendChild(el);
+  }
+}
+
+function renderThumbs() {
+  const thumbs = document.getElementById('thumbs');
+  thumbs.innerHTML = '';
+  deck.slides.forEach((s, i) => {
+    const t = document.createElement('div');
+    t.className = 'thumb' + (i === cur ? ' active' : '');
+    t.innerHTML = `<span class="n">${i + 1}</span>`;
+    const mini = document.createElement('div');
+    mini.className = 'slide mini';
+    renderSlideInto(mini, s, false);
+    t.appendChild(mini);
+    t.onclick = () => { cur = i; selId = null; render(); };
+    thumbs.appendChild(t);
+    requestAnimationFrame(() => { mini.style.transform = `scale(${t.clientWidth / W})`; });
+  });
+}
+
+function renderStage() {
+  const slide = deck.slides[cur];
+  renderSlideInto(stage, slide, true);
+  document.getElementById('bg').value = slide.bg;
+  stage.querySelectorAll('.box').forEach(el => {
+    if (el.dataset.id === selId) selectBox(el);
+  });
+  fitStage();
+  document.getElementById('status').textContent = `Slide ${cur + 1} of ${deck.slides.length} · autosaved locally`;
+}
+
+function render() { renderStage(); renderThumbs(); persist(); }
+
+function fitStage() {
+  const wrap = document.getElementById('stageWrap');
+  const s = Math.min((wrap.clientWidth - 32) / W, (wrap.clientHeight - 32) / H, 1.5);
+  stage.style.transform = `scale(${Math.max(s, 0.1)})`;
+}
+window.addEventListener('resize', fitStage);
+
+const item = id => deck.slides[cur].items.find(i => i.id === id);
+
+function selectBox(el) {
+  stage.querySelectorAll('.box.selected').forEach(b => { b.classList.remove('selected'); b.querySelector('.handle')?.remove(); });
+  if (!el) { selId = null; return; }
+  selId = el.dataset.id;
+  el.classList.add('selected');
+  const h = document.createElement('div');
+  h.className = 'handle'; h.textContent = '⠿ drag'; h.contentEditable = 'false';
+  el.appendChild(h);
+  const it = item(selId);
+  if (it.type === 'text') {
+    document.getElementById('fsize').value = String(it.size);
+    document.getElementById('fcolor').value = it.color;
+  }
+}
+
+stage.addEventListener('mousedown', e => {
+  const box = e.target.closest('.box');
+  if (!box) { selectBox(null); return; }
+  if (box.dataset.id !== selId) selectBox(box);
+  if (!e.target.classList.contains('handle')) return;
+  // Drag via handle. Stage is CSS-scaled, so convert screen px to slide px.
+  e.preventDefault();
+  const scale = stage.getBoundingClientRect().width / W;
+  const it = item(box.dataset.id);
+  const sx = e.clientX, sy = e.clientY, ox = it.x, oy = it.y;
+  const onMove = ev => {
+    it.x = Math.round(ox + (ev.clientX - sx) / scale);
+    it.y = Math.round(oy + (ev.clientY - sy) / scale);
+    box.style.left = it.x + 'px'; box.style.top = it.y + 'px';
+  };
+  const onUp = () => { removeEventListener('mousemove', onMove); removeEventListener('mouseup', onUp); renderThumbs(); persist(); };
+  addEventListener('mousemove', onMove); addEventListener('mouseup', onUp);
+});
+// Capture CSS resize (resize: both) on mouseup.
+stage.addEventListener('mouseup', () => {
+  const box = stage.querySelector('.box.selected'); if (!box) return;
+  const it = item(box.dataset.id);
+  const w = box.offsetWidth, h = box.offsetHeight;
+  if (Math.abs(w - it.w) > 1 || Math.abs(h - it.h) > 1) { it.w = w; it.h = h; renderThumbs(); persist(); }
+});
+stage.addEventListener('input', e => {
+  const box = e.target.closest('.box'); if (!box) return;
+  const clone = box.cloneNode(true); clone.querySelector('.handle')?.remove();
+  item(box.dataset.id).text = clone.innerText;
+  persist();
+});
+stage.addEventListener('focusout', () => renderThumbs());
+
+function updateSel(fn) {
+  const it = selId && item(selId);
+  if (!it || it.type !== 'text') return;
+  fn(it); render();
+}
+document.getElementById('fsize').onchange = e => updateSel(it => it.size = +e.target.value);
+document.getElementById('fcolor').oninput = e => updateSel(it => it.color = e.target.value);
+document.getElementById('bg').oninput = e => { deck.slides[cur].bg = e.target.value; render(); };
+titleEl.addEventListener('input', persist);
+
+const actions = {
+  newDeck() {
+    if (!confirm('Start a new presentation? The current one will be replaced.')) return;
+    deck = { slides: [titleSlide()] }; cur = 0; selId = null; titleEl.value = 'Untitled presentation'; render();
+  },
+  async openDeck() {
+    const file = await pickFile('.json');
+    if (!file) return;
+    try {
+      const data = JSON.parse(await file.text());
+      if (!Array.isArray(data.deck?.slides)) throw new Error();
+      deck = data.deck; titleEl.value = data.title || 'Untitled presentation'; cur = 0; selId = null; render();
+    } catch { alert('That file is not an OpenDesk presentation.'); }
+  },
+  saveDeck() {
+    download(safeName(titleEl.value, 'presentation') + '.opendesk.json', JSON.stringify({ title: titleEl.value, deck }), 'application/json');
+  },
+  exportPptx() {
+    if (!window.PptxGenJS) return alert('The PowerPoint exporter failed to load (are you offline?).');
+    const pptx = new PptxGenJS();
+    pptx.layout = 'LAYOUT_16x9'; // 10 x 5.625 in
+    const k = 10 / W; // slide px -> inches
+    for (const s of deck.slides) {
+      const ps = pptx.addSlide();
+      ps.background = { color: s.bg.replace('#', '') };
+      for (const it of s.items) {
+        const pos = { x: it.x * k, y: it.y * k, w: it.w * k, h: it.h * k };
+        if (it.type === 'image') ps.addImage({ data: it.src, ...pos, sizing: { type: 'contain', w: pos.w, h: pos.h } });
+        // px -> pt: 1px = 0.75pt at 96dpi, and the slide is 960px over 720pt.
+        else ps.addText(it.text, { ...pos, fontSize: Math.round(it.size * 0.75), color: it.color.replace('#', ''), bold: it.bold, fontFace: 'Calibri', valign: 'top', margin: 4 });
+      }
+    }
+    pptx.writeFile({ fileName: safeName(titleEl.value, 'presentation') + '.pptx' });
+  },
+  addSlide() { deck.slides.splice(cur + 1, 0, blankSlide()); cur++; selId = null; render(); },
+  dupSlide() {
+    const copy = JSON.parse(JSON.stringify(deck.slides[cur]));
+    copy.items.forEach(i => i.id = uid());
+    deck.slides.splice(cur + 1, 0, copy); cur++; render();
+  },
+  delSlide() {
+    if (deck.slides.length === 1) return;
+    deck.slides.splice(cur, 1); cur = Math.min(cur, deck.slides.length - 1); selId = null; render();
+  },
+  addText() {
+    const it = { id: uid(), type: 'text', x: 280, y: 220, w: 400, h: 80, text: 'New text', size: 24, color: '#222222', bold: false };
+    deck.slides[cur].items.push(it); selId = it.id; render();
+  },
+  async addImage() {
+    const file = await pickFile('image/*');
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      const it = { id: uid(), type: 'image', x: 330, y: 150, w: 300, h: 240, src: reader.result };
+      deck.slides[cur].items.push(it); selId = it.id; render();
+    };
+    reader.readAsDataURL(file);
+  },
+  delBox() {
+    if (!selId) return;
+    const s = deck.slides[cur]; s.items = s.items.filter(i => i.id !== selId); selId = null; render();
+  },
+  bold() { updateSel(it => it.bold = !it.bold); },
+  present() {
+    presentIdx = cur;
+    const p = document.getElementById('present');
+    p.classList.remove('hidden');
+    p.requestFullscreen?.().catch(() => {});
+    showPresent();
+  },
+};
+document.querySelectorAll('[data-act]').forEach(b => b.addEventListener('click', () => actions[b.dataset.act]()));
+
+function showPresent() {
+  const p = document.getElementById('present');
+  p.innerHTML = '';
+  const s = document.createElement('div');
+  s.className = 'slide';
+  renderSlideInto(s, deck.slides[presentIdx], false);
+  s.style.transform = `scale(${Math.min(innerWidth / W, innerHeight / H)})`;
+  p.appendChild(s);
+}
+function endPresent() {
+  document.getElementById('present').classList.add('hidden');
+  if (document.fullscreenElement) document.exitFullscreen().catch(() => {});
+}
+document.getElementById('present').addEventListener('click', () => {
+  if (presentIdx < deck.slides.length - 1) { presentIdx++; showPresent(); } else endPresent();
+});
+document.addEventListener('fullscreenchange', () => { if (!document.fullscreenElement) endPresent(); else showPresent(); });
+document.addEventListener('keydown', e => {
+  const presenting = !document.getElementById('present').classList.contains('hidden');
+  if (presenting) {
+    if (['ArrowRight', 'ArrowDown', ' ', 'PageDown'].includes(e.key)) { presentIdx = Math.min(presentIdx + 1, deck.slides.length - 1); showPresent(); }
+    else if (['ArrowLeft', 'ArrowUp', 'PageUp'].includes(e.key)) { presentIdx = Math.max(presentIdx - 1, 0); showPresent(); }
+    else if (e.key === 'Escape') endPresent();
+    e.preventDefault();
+  } else if (e.key === 'F5') { e.preventDefault(); actions.present(); }
+});
+
+const saved = Store.get(KEY);
+deck = saved?.deck?.slides?.length ? saved.deck : { slides: [titleSlide()] };
+if (saved?.title) titleEl.value = saved.title;
+render();
+</script>
+</body>
+</html>

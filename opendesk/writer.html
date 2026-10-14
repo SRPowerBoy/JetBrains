@@ -1,0 +1,189 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>OpenDesk Writer</title>
+<link rel="stylesheet" href="common.css">
+<script src="https://cdn.jsdelivr.net/npm/mammoth@1.6.0/mammoth.browser.min.js"></script>
+<style>
+  .scroll { flex: 1; overflow: auto; padding: 24px 16px; }
+  #page {
+    background: var(--page); color: #111; max-width: 816px; min-height: 1056px; margin: 0 auto;
+    padding: 72px 72px; box-shadow: 0 1px 4px rgba(0,0,0,.25); outline: none;
+    font: 12pt/1.5 Calibri, Carlito, "Segoe UI", sans-serif;
+  }
+  #page table { border-collapse: collapse; width: 100%; }
+  #page td, #page th { border: 1px solid #999; padding: 4px 6px; min-width: 40px; }
+  #page img { max-width: 100%; }
+  @media (max-width: 600px) { #page { padding: 24px 16px; min-height: 60vh; } }
+  @media print {
+    header, .toolbar, .status { display: none !important; }
+    .scroll { padding: 0; overflow: visible; }
+    #page { box-shadow: none; padding: 0; max-width: none; min-height: 0; }
+  }
+</style>
+</head>
+<body>
+<header class="appbar">
+  <a href="index.html">OpenDesk Writer</a>
+  <input class="title" id="title" value="Untitled document" aria-label="Document title">
+</header>
+<div class="toolbar">
+  <button data-act="new" title="New">New</button>
+  <button data-act="open" title="Open .docx, .html or .txt">Open</button>
+  <select id="saveAs" aria-label="Save as">
+    <option value="">Save as…</option>
+    <option value="doc">Word (.doc)</option>
+    <option value="html">Web page (.html)</option>
+    <option value="txt">Plain text (.txt)</option>
+    <option value="pdf">PDF (print)</option>
+  </select>
+  <span class="sep"></span>
+  <button data-cmd="undo" title="Undo (Ctrl+Z)">↶</button>
+  <button data-cmd="redo" title="Redo (Ctrl+Y)">↷</button>
+  <span class="sep"></span>
+  <select id="block" aria-label="Paragraph style">
+    <option value="P">Normal</option><option value="H1">Heading 1</option>
+    <option value="H2">Heading 2</option><option value="H3">Heading 3</option>
+    <option value="BLOCKQUOTE">Quote</option><option value="PRE">Code</option>
+  </select>
+  <select id="font" aria-label="Font">
+    <option>Calibri</option><option>Arial</option><option>Georgia</option>
+    <option>Times New Roman</option><option>Courier New</option><option>Verdana</option>
+  </select>
+  <select id="size" aria-label="Font size">
+    <option value="1">8</option><option value="2">10</option><option value="3" selected>12</option>
+    <option value="4">14</option><option value="5">18</option><option value="6">24</option><option value="7">36</option>
+  </select>
+  <span class="sep"></span>
+  <button data-cmd="bold" title="Bold (Ctrl+B)"><b>B</b></button>
+  <button data-cmd="italic" title="Italic (Ctrl+I)"><i>I</i></button>
+  <button data-cmd="underline" title="Underline (Ctrl+U)"><u>U</u></button>
+  <button data-cmd="strikeThrough" title="Strikethrough"><s>S</s></button>
+  <input type="color" id="color" title="Text color" value="#000000">
+  <input type="color" id="highlight" title="Highlight" value="#ffff00">
+  <span class="sep"></span>
+  <button data-cmd="justifyLeft" title="Align left">⯇</button>
+  <button data-cmd="justifyCenter" title="Center">≡</button>
+  <button data-cmd="justifyRight" title="Align right">⯈</button>
+  <button data-cmd="insertUnorderedList" title="Bullets">• List</button>
+  <button data-cmd="insertOrderedList" title="Numbering">1. List</button>
+  <span class="sep"></span>
+  <button data-act="link" title="Insert link">Link</button>
+  <button data-act="image" title="Insert image">Image</button>
+  <button data-act="table" title="Insert table">Table</button>
+  <button data-act="pagebreak" title="Page break">Break</button>
+</div>
+<div class="scroll"><div id="page" contenteditable="true" spellcheck="true"><p><br></p></div></div>
+<div class="status" id="status">0 words</div>
+
+<script src="common.js"></script>
+<script>
+const page = document.getElementById('page');
+const titleEl = document.getElementById('title');
+const KEY = 'opendesk.writer';
+
+function exec(cmd, val = null) { page.focus(); document.execCommand(cmd, false, val); save(); }
+
+function updateStatus() {
+  const words = (page.innerText.match(/\S+/g) || []).length;
+  document.getElementById('status').textContent = `${words} words · ${page.innerText.length} characters · autosaved locally`;
+}
+let saveTimer;
+function save() {
+  updateStatus();
+  clearTimeout(saveTimer);
+  saveTimer = setTimeout(() => Store.set(KEY, { title: titleEl.value, html: page.innerHTML }), 400);
+}
+
+function load(title, html) {
+  titleEl.value = title; page.innerHTML = html || '<p><br></p>'; save();
+}
+
+const saved = Store.get(KEY);
+if (saved) load(saved.title, saved.html);
+updateStatus();
+
+page.addEventListener('input', save);
+titleEl.addEventListener('input', save);
+document.execCommand('styleWithCSS', false, true);
+
+document.querySelectorAll('[data-cmd]').forEach(b =>
+  b.addEventListener('click', () => exec(b.dataset.cmd)));
+document.getElementById('block').onchange = e => exec('formatBlock', e.target.value);
+document.getElementById('font').onchange = e => exec('fontName', e.target.value);
+document.getElementById('size').onchange = e => exec('fontSize', e.target.value);
+document.getElementById('color').oninput = e => exec('foreColor', e.target.value);
+document.getElementById('highlight').oninput = e => exec('hiliteColor', e.target.value);
+
+function wrapDoc(body) {
+  const t = titleEl.value.replace(/</g, '&lt;');
+  return `<!doctype html><html><head><meta charset="utf-8"><title>${t}</title>
+<style>body{font:12pt/1.5 Calibri,sans-serif;max-width:816px;margin:auto}table{border-collapse:collapse}td,th{border:1px solid #999;padding:4px 6px}</style>
+</head><body>${body}</body></html>`;
+}
+
+const actions = {
+  new() {
+    if (confirm('Start a new document? Unsaved changes in this one will be replaced.')) load('Untitled document', '');
+  },
+  async open() {
+    const file = await pickFile('.docx,.html,.htm,.txt,.md');
+    if (!file) return;
+    const name = file.name.replace(/\.[^.]+$/, '');
+    if (/\.docx$/i.test(file.name)) {
+      if (!window.mammoth) return alert('The .docx importer failed to load (are you offline?).');
+      const result = await mammoth.convertToHtml({ arrayBuffer: await file.arrayBuffer() });
+      load(name, result.value);
+    } else if (/\.html?$/i.test(file.name)) {
+      const doc = new DOMParser().parseFromString(await file.text(), 'text/html');
+      doc.querySelectorAll('script,style,iframe,object,embed').forEach(n => n.remove());
+      doc.querySelectorAll('*').forEach(n => [...n.attributes].forEach(a => { if (/^on/i.test(a.name)) n.removeAttribute(a.name); }));
+      load(name, doc.body.innerHTML);
+    } else {
+      const div = document.createElement('div');
+      load(name, (await file.text()).split(/\n/).map(line => { div.textContent = line; return `<p>${div.innerHTML || '<br>'}</p>`; }).join(''));
+    }
+  },
+  link() {
+    const url = prompt('Link URL:', 'https://');
+    if (url && /^(https?:|mailto:)/i.test(url)) exec('createLink', url);
+  },
+  async image() {
+    const file = await pickFile('image/*');
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => exec('insertImage', reader.result);
+    reader.readAsDataURL(file);
+  },
+  table() {
+    const rows = +prompt('Rows:', '3') || 0, cols = +prompt('Columns:', '3') || 0;
+    if (rows < 1 || cols < 1 || rows > 100 || cols > 20) return;
+    const row = '<tr>' + '<td><br></td>'.repeat(cols) + '</tr>';
+    exec('insertHTML', `<table>${row.repeat(rows)}</table><p><br></p>`);
+  },
+  pagebreak() { exec('insertHTML', '<hr style="page-break-after:always;border:0;border-top:1px dashed #bbb"><p><br></p>'); },
+};
+document.querySelectorAll('[data-act]').forEach(b => b.addEventListener('click', () => actions[b.dataset.act]()));
+
+document.getElementById('saveAs').onchange = e => {
+  const fmt = e.target.value; e.target.value = '';
+  const name = safeName(titleEl.value, 'document');
+  if (fmt === 'doc') {
+    // Word opens HTML saved with the msword MIME type and preserves formatting.
+    download(name + '.doc', '﻿' + wrapDoc(page.innerHTML), 'application/msword');
+  } else if (fmt === 'html') download(name + '.html', wrapDoc(page.innerHTML), 'text/html');
+  else if (fmt === 'txt') download(name + '.txt', page.innerText, 'text/plain');
+  else if (fmt === 'pdf') window.print();
+};
+
+document.addEventListener('keydown', e => {
+  if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 's') {
+    e.preventDefault();
+    download(safeName(titleEl.value, 'document') + '.doc', '﻿' + wrapDoc(page.innerHTML), 'application/msword');
+  }
+});
+</script>
+</body>
+</html>

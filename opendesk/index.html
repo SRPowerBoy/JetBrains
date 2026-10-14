@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>OpenDesk</title>
+<link rel="stylesheet" href="common.css">
+<style>
+  main { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 24px 16px; }
+  h1 { margin: 0 0 4px; font-size: 32px; }
+  p.lead { color: var(--muted); margin: 0 0 32px; text-align: center; }
+  .apps { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 16px; width: 100%; max-width: 720px; }
+  .app { display: block; padding: 24px; border-radius: 10px; background: var(--panel); border: 1px solid var(--border); color: var(--text); text-decoration: none; }
+  .app:hover { border-color: var(--accent); }
+  .app .icon { width: 44px; height: 44px; border-radius: 8px; display: grid; place-items: center; color: #fff; font-weight: 700; font-size: 20px; margin-bottom: 12px; }
+  .app h2 { margin: 0 0 4px; font-size: 18px; }
+  .app span { color: var(--muted); font-size: 13px; }
+</style>
+</head>
+<body>
+<main>
+  <h1>OpenDesk</h1>
+  <p class="lead">Free, open-source office suite. Runs entirely in your browser — no account, no server, your files stay on your device.</p>
+  <div class="apps">
+    <a class="app" href="writer.html"><div class="icon" style="background:#2b6cb0">W</div><h2>Writer</h2><span>Documents · opens .docx</span></a>
+    <a class="app" href="sheets.html"><div class="icon" style="background:#2f855a">S</div><h2>Sheets</h2><span>Spreadsheets · .xlsx / .csv</span></a>
+    <a class="app" href="slides.html"><div class="icon" style="background:#c05621">P</div><h2>Slides</h2><span>Presentations · exports .pptx</span></a>
+  </div>
+</main>
+</body>
+</html>
