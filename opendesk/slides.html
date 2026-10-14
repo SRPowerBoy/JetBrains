@@ -70,7 +70,8 @@
 <script src="common.js"></script>
 <script src="sheets-engine.js"></script>
 <script src="features.js"></script>
-<script>
+<script type="module">
+await Store.ready; // storage loads asynchronously; everything below can use it synchronously
 const DOC = Docs.open('slides', { title: 'Untitled presentation', deck: null });
 const W = 960, H = 540;
 const titleEl = document.getElementById('title');
@@ -90,8 +91,10 @@ const blankSlide = () => ({ bg: '#ffffff', items: [
 let saveTimer;
 function persist() {
   clearTimeout(saveTimer);
-  saveTimer = setTimeout(() => { if (DOC.id) Docs.save(DOC.id, { title: titleEl.value, deck }); }, 300);
+  saveTimer = setTimeout(saveNow, 300);
 }
+function saveNow() { clearTimeout(saveTimer); if (DOC.id) Docs.save(DOC.id, { title: titleEl.value, deck }); }
+addEventListener('pagehide', saveNow);
 
 function boxEl(item, editable) {
   const el = document.createElement('div');
@@ -229,7 +232,7 @@ const actions = {
       if (!Array.isArray(data.deck?.slides)) throw new Error();
       // Opened files become a new presentation; the current one is left untouched.
       const id = Docs.create('slides', { title: String(data.title || 'Untitled presentation'), deck: cleanDeck(data.deck) });
-      if (id) location.href = Docs.url('slides', id);
+      if (id) go(Docs.url('slides', id));
     } catch { alert('That file is not an OpenDesk presentation.'); }
   },
   saveDeck() {
@@ -375,6 +378,9 @@ const slideCommands = () => [
     return cmd(`Go to slide ${i + 1}${title ? ': ' + title : ''}`, () => { cur = i; selId = null; render(); }, '', 'jump');
   }),
 ];
+
+// Read-only console/test access to module state.
+Object.defineProperties(window, { deck: { get: () => deck }, cur: { get: () => cur } });
 
 OpenDesk.setup({
   app: 'slides',

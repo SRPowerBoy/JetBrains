@@ -1,9 +1,105 @@
-// Shared helpers: storage that never throws, file download/open, HTML sanitizing.
-const Store = {
-  get(key) { try { return JSON.parse(localStorage.getItem(key)); } catch { return null; } },
-  // Returns false when storage is unavailable or full, so callers can trim and retry.
-  set(key, value) { try { localStorage.setItem(key, JSON.stringify(value)); return true; } catch { return false; } },
-};
+// Shared helpers: storage, file download/open, HTML sanitizing.
+
+// Storage lives in IndexedDB (hundreds of MB) behind a synchronous in-memory cache:
+// pages `await Store.ready` once, then get/set are instant and writes persist in the background.
+// Falls back to localStorage (~5 MB) where IndexedDB is unavailable.
+const Store = (() => {
+  const cache = new Map();
+  const listeners = new Set();
+  const channel = 'BroadcastChannel' in self ? new BroadcastChannel('opendesk-store') : null;
+  let db = null, pending = Promise.resolve(), backend = 'memory';
+
+  const clone = v => (v == null ? null : structuredClone(v));
+  const lsGet = k => { try { return JSON.parse(localStorage.getItem(k)); } catch { return null; } };
+  const req = r => new Promise((res, rej) => { r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error); });
+
+  function openDB() {
+    return new Promise((resolve, reject) => {
+      const r = indexedDB.open('opendesk', 1);
+      r.onupgradeneeded = () => r.result.createObjectStore('kv');
+      r.onsuccess = () => resolve(r.result);
+      r.onerror = () => reject(r.error);
+      r.onblocked = () => reject(new Error('blocked'));
+    });
+  }
+
+  function persist(op, key, value) {
+    if (backend === 'local') {
+      try { op === 'put' ? localStorage.setItem(key, JSON.stringify(value)) : localStorage.removeItem(key); return true; }
+      catch { return false; }
+    }
+    if (backend !== 'idb') return true;
+    pending = pending.then(() => new Promise(resolve => {
+      const tx = db.transaction('kv', 'readwrite');
+      op === 'put' ? tx.objectStore('kv').put(value, key) : tx.objectStore('kv').delete(key);
+      tx.oncomplete = () => resolve();
+      tx.onerror = tx.onabort = () => {
+        if (/quota/i.test(tx.error?.name || '')) Docs.storageFull();
+        resolve();
+      };
+    }));
+    return true;
+  }
+
+  const ready = (async () => {
+    try {
+      db = await openDB();
+      const store = db.transaction('kv').objectStore('kv');
+      const [keys, values] = await Promise.all([req(store.getAllKeys()), req(store.getAll())]);
+      keys.forEach((k, i) => cache.set(k, values[i]));
+      backend = 'idb';
+      // One-time copy of data saved before the IndexedDB move. The localStorage copy is left in place.
+      if (!cache.has('opendesk.storage-migrated')) {
+        for (let i = 0; i < localStorage.length; i++) {
+          const k = localStorage.key(i);
+          if (k.startsWith('opendesk.') && !cache.has(k)) { const v = lsGet(k); cache.set(k, v); persist('put', k, v); }
+        }
+        cache.set('opendesk.storage-migrated', true); persist('put', 'opendesk.storage-migrated', true);
+      }
+    } catch {
+      backend = 'local';
+      try {
+        for (let i = 0; i < localStorage.length; i++) { const k = localStorage.key(i); if (k.startsWith('opendesk.')) cache.set(k, lsGet(k)); }
+      } catch { backend = 'memory'; }
+    }
+  })();
+
+  // Other tabs' writes arrive here so live data and file lists stay current.
+  if (channel) channel.onmessage = e => {
+    const { key, value, removed } = e.data || {};
+    if (typeof key !== 'string') return;
+    removed ? cache.delete(key) : cache.set(key, value);
+    listeners.forEach(fn => fn(key));
+  };
+
+  return {
+    ready,
+    get backend() { return backend; },
+    get(key) { return clone(cache.get(key)); },
+    // Returns false only when the localStorage fallback is full (IndexedDB quota errors alert via Docs.storageFull).
+    set(key, value) {
+      const v = clone(value);
+      cache.set(key, v);
+      channel?.postMessage({ key, value: v });
+      return persist('put', key, v);
+    },
+    remove(key) {
+      cache.delete(key);
+      channel?.postMessage({ key, removed: true });
+      persist('delete', key);
+    },
+    keys() { return [...cache.keys()]; },
+    // Resolves once every write so far is safely on disk — await before navigating away.
+    flush() { return pending; },
+    subscribe(fn) { listeners.add(fn); },
+  };
+})();
+
+// Navigate only after pending writes are saved (a just-created file must exist on the next page).
+async function go(url, replace) {
+  await Store.flush();
+  replace ? location.replace(url) : (location.href = url);
+}
 
 function download(filename, data, type) {
   const blob = data instanceof Blob ? data : new Blob([data], { type });
@@ -73,7 +169,7 @@ const Docs = {
     return true;
   },
   remove(id) {
-    try { localStorage.removeItem(this.key(id)); localStorage.removeItem(this.key(id) + '.history'); } catch { /* ignore */ }
+    Store.remove(this.key(id)); Store.remove(this.key(id) + '.history');
     Store.set(this.INDEX, this.all().filter(d => d.id !== id));
   },
   // Move single-file data saved before multi-file support into a normal file (once). Returns its id.
@@ -105,3 +201,7 @@ const Docs = {
 if ('serviceWorker' in navigator && /^https?:$/.test(location.protocol)) {
   addEventListener('load', () => navigator.serviceWorker.register('sw.js').catch(() => {}));
 }
+
+// A page restored from the back/forward cache holds an old copy of storage and could save over
+// newer edits made in another page meanwhile, so reload it fresh.
+addEventListener('pageshow', e => { if (e.persisted) location.reload(); });

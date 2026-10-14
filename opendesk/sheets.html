@@ -53,7 +53,8 @@
 <script src="sheets-engine.js"></script>
 <script src="sheets-fill.js"></script>
 <script src="features.js"></script>
-<script>
+<script type="module">
+await Store.ready; // storage loads asynchronously; everything below can use it synchronously
 const ROWS = 100, COLS = 26;
 const DOC = Docs.open('sheets', { title: 'Untitled spreadsheet', raw: {}, bold: {} });
 const { computeAll, colName } = SheetEngine;
@@ -95,8 +96,10 @@ function render() {
 let saveTimer;
 function persist() {
   clearTimeout(saveTimer);
-  saveTimer = setTimeout(() => { if (DOC.id) Docs.save(DOC.id, { title: titleEl.value, raw, bold }); }, 100);
+  saveTimer = setTimeout(saveNow, 100);
 }
+function saveNow() { clearTimeout(saveTimer); if (DOC.id) Docs.save(DOC.id, { title: titleEl.value, raw, bold }); }
+addEventListener('pagehide', saveNow);
 
 function setCell(id, value) {
   if (value === '') delete raw[id]; else raw[id] = value;
@@ -412,7 +415,7 @@ document.getElementById('openBtn').onclick = async () => {
   if (wb.SheetNames.length > 1) alert(`Opened the first sheet ("${wb.SheetNames[0]}") only — multiple sheets aren't supported yet.`);
   // Opened files become a new spreadsheet; the current one is left untouched.
   const id = Docs.create('sheets', { title: file.name.replace(/\.[^.]+$/, ''), raw: imported, bold: {} });
-  if (id) location.href = Docs.url('sheets', id);
+  if (id) go(Docs.url('sheets', id));
 };
 
 function buildSheet() {
@@ -506,6 +509,9 @@ const sheetCommands = () => [
   cmd('Save as Excel (.xlsx)', () => document.getElementById('xlsxBtn').click(), '', 'download export'),
   cmd('Save as CSV', () => document.getElementById('csvBtn').click(), '', 'download export'),
 ];
+
+// Read-only console/test access to module state.
+Object.defineProperties(window, { raw: { get: () => raw }, sel: { get: () => sel } });
 
 OpenDesk.setup({
   app: 'sheets',

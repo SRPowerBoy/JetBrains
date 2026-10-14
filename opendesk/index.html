@@ -81,7 +81,8 @@
 </main>
 <script src="common.js"></script>
 <script src="templates.js"></script>
-<script>
+<script type="module">
+await Store.ready; // storage loads asynchronously; everything below can use it synchronously
 const APP = { writer: ['W', 'Document'], sheets: ['S', 'Spreadsheet'], slides: ['P', 'Presentation'] };
 const filesEl = document.getElementById('files');
 const esc = s => String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -132,15 +133,20 @@ document.getElementById('templates').addEventListener('click', e => {
   const btn = e.target.closest('[data-tpl]'); if (!btn) return;
   const t = TEMPLATES[+btn.dataset.tpl];
   const id = Docs.create(t.app, JSON.parse(JSON.stringify(t.state)));
-  if (id) location.href = Docs.url(t.app, id);
+  if (id) go(Docs.url(t.app, id));
 });
 
-function updateMeter() {
-  let chars = 0;
-  try { for (let i = 0; i < localStorage.length; i++) { const k = localStorage.key(i); chars += k.length + (localStorage.getItem(k) || '').length; } } catch { /* unavailable */ }
-  const mb = chars * 2 / 1048576, cap = 5; // browsers allow ~5 MB (UTF-16) per site for localStorage
-  document.getElementById('meterFill').style.width = Math.min(100, mb / cap * 100) + '%';
-  document.getElementById('meterText').textContent = `${mb.toFixed(1)} of ~${cap} MB`;
+async function updateMeter() {
+  let used = 0, cap = 5 * 1048576; // localStorage fallback: ~5 MB per site
+  if (Store.backend === 'idb' && navigator.storage?.estimate) {
+    const est = await navigator.storage.estimate().catch(() => null);
+    if (est) { used = est.usage || 0; cap = est.quota || cap; }
+  } else {
+    for (const k of Store.keys()) used += (k.length + JSON.stringify(Store.get(k) ?? '').length) * 2;
+  }
+  const fmtSize = b => (b >= 1073741824 ? (b / 1073741824).toFixed(1) + ' GB' : (b / 1048576).toFixed(1) + ' MB');
+  document.getElementById('meterFill').style.width = Math.min(100, used / cap * 100) + '%';
+  document.getElementById('meterText').textContent = `${fmtSize(used)} of ${fmtSize(cap)}` + (Store.backend === 'idb' ? '' : ' (limited storage mode)');
 }
 
 filesEl.addEventListener('click', e => {
@@ -156,7 +162,7 @@ filesEl.addEventListener('click', e => {
 });
 document.getElementById('search').oninput = renderFiles;
 document.getElementById('filter').onchange = renderFiles;
-addEventListener('storage', renderFiles);
+Store.subscribe(key => { if (key === Docs.INDEX) renderFiles(); });
 addEventListener('pageshow', renderFiles);
 
 document.getElementById('backup').onclick = () => {

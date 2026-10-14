@@ -8,7 +8,7 @@ A free, open-source office suite that runs entirely in the browser. No server, n
 | **Sheets** | 26×100 grid, formulas, AutoSum, bold | .xlsx, .xls, .ods, .csv | .xlsx (keeps formulas), .csv |
 | **Slides** | Text/image boxes, drag & resize, backgrounds, fullscreen present (F5) | OpenDesk .json | .pptx, OpenDesk .json |
 
-Work autosaves to your browser. The home page lists all your files (search, filter, copy, delete) with a storage meter and one-click **backup / restore** of every file.
+Work autosaves to your browser's IndexedDB storage — typically hundreds of MB to several GB, so documents with images are fine. The home page lists all your files (search, filter, copy, delete) with a storage meter and one-click **backup / restore** of every file.
 
 **Works offline and installs like an app** (service worker + web manifest). All libraries are bundled in `vendor/` — nothing loads from a CDN.
 
@@ -43,7 +43,7 @@ Or host it free on GitHub Pages: `.github/workflows/pages.yml` deploys the `open
 
 ## Known limits (honest list)
 
-- Files live in this browser's storage (~5 MB total, shown on the home page). Clearing site data erases them — use **Back up all files** regularly. Images use space fast.
+- Files live in this browser's storage (usage and quota shown on the home page). Clearing site data erases them — use **Back up all files** regularly. Browsers without IndexedDB fall back to localStorage (~5 MB), flagged as "limited storage mode".
 - Offline updates arrive one visit late (the cached version loads first, the new one is fetched in the background).
 
 - Writer saves Word-compatible HTML as `.doc`, not real `.docx`. `.docx` import drops some layout (mammoth focuses on structure).

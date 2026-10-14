@@ -110,7 +110,7 @@ const OpenDesk = (() => {
     if (!id) return;
     pushHistory(Docs.key(id), data.state, 'Opened from shared link');
     if (cfg.isEmpty?.()) Docs.remove(cfg.id); // drop the blank file created just to land here
-    location.replace(Docs.url(cfg.app, id));
+    go(Docs.url(cfg.app, id), true);
   }
 
   // ---------- version history ----------
@@ -119,7 +119,7 @@ const OpenDesk = (() => {
 
   function pushHistory(key, state, label) {
     const s = JSON.stringify(state);
-    if (s.length > 1.5e6) return; // too big for localStorage history
+    if (s.length > 5e6) return; // skip very large snapshots (big embedded images)
     const list = Store.get(historyKey(key)) || [];
     if (list.length && list[list.length - 1].s === s) return;
     list.push({ t: Date.now(), s, label });
@@ -320,8 +320,8 @@ const OpenDesk = (() => {
 
   // Call fn whenever the spreadsheet changes (other tabs via 'storage', same tab on focus).
   function onSheetChange(fn) {
-    addEventListener('storage', e => {
-      const m = /^opendesk\.doc\.([^.]+)$/.exec(e.key || '');
+    Store.subscribe(key => {
+      const m = /^opendesk\.doc\.([^.]+)$/.exec(key);
       if (m && Docs.meta(m[1])?.app === 'sheets') fn();
     });
     addEventListener('focus', fn);

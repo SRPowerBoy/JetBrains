@@ -87,7 +87,8 @@
 <script src="common.js"></script>
 <script src="sheets-engine.js"></script>
 <script src="features.js"></script>
-<script>
+<script type="module">
+await Store.ready; // storage loads asynchronously; everything below can use it synchronously
 const page = document.getElementById('page');
 const titleEl = document.getElementById('title');
 const BLANK = { title: 'Untitled document', html: '' };
@@ -108,8 +109,10 @@ let saveTimer;
 function save() {
   updateStatus();
   clearTimeout(saveTimer);
-  saveTimer = setTimeout(() => { if (DOC.id) Docs.save(DOC.id, { title: titleEl.value, html: page.innerHTML }); }, 400);
+  saveTimer = setTimeout(saveNow, 400);
 }
+function saveNow() { clearTimeout(saveTimer); if (DOC.id) Docs.save(DOC.id, { title: titleEl.value, html: page.innerHTML }); }
+addEventListener('pagehide', saveNow);
 
 // Stored HTML may come from a share link or an old version, so always sanitize it.
 function load(title, html) {
@@ -120,7 +123,7 @@ load(String(DOC.state.title || BLANK.title), DOC.state.html);
 
 function openAsNewFile(title, html) {
   const id = Docs.create('writer', { title, html: sanitizeHTML(html) });
-  if (id) location.href = Docs.url('writer', id);
+  if (id) go(Docs.url('writer', id));
 }
 
 page.addEventListener('input', save);
@@ -188,7 +191,7 @@ const actions = {
   toSlides() {
     // Always a new presentation file, so no existing deck is replaced.
     const id = Docs.create('slides', { title: titleEl.value, deck: docToDeck() });
-    if (id) location.href = Docs.url('slides', id);
+    if (id) go(Docs.url('slides', id));
   },
   pagebreak() { exec('insertHTML', '<hr style="page-break-after:always;border:0;border-top:1px dashed #bbb"><p><br></p>'); },
 };
