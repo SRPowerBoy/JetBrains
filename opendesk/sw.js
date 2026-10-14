@@ -1,10 +1,10 @@
 // Offline support. Precaches the whole app, then serves from cache and refreshes in the
 // background (stale-while-revalidate), so updates appear on the next visit.
 // Bump VERSION when files are added or removed.
-const VERSION = 'opendesk-v1';
+const VERSION = 'opendesk-v2';
 const FILES = [
   './', 'index.html', 'writer.html', 'sheets.html', 'slides.html',
-  'common.css', 'common.js', 'features.js', 'sheets-engine.js', 'manifest.webmanifest',
+  'common.css', 'common.js', 'features.js', 'sheets-engine.js', 'sheets-fill.js', 'manifest.webmanifest',
   'icons/icon.svg', 'icons/icon-192.png', 'icons/icon-512.png',
   'vendor/mammoth.browser.min.js', 'vendor/xlsx.full.min.js', 'vendor/pptxgen.bundle.js',
 ];

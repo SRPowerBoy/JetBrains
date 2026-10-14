@@ -24,6 +24,10 @@
   td input.err { color: #e53e3e; }
   td input.bold { font-weight: 700; }
   td.sel { outline: 2px solid #2f855a; outline-offset: -2px; }
+  td.insel { background: rgba(47,133,90,.12); }
+  td.fillprev { outline: 1px dashed #2f855a; outline-offset: -2px; }
+  .grid-wrap { position: relative; }
+  #fillHandle { position: absolute; width: 8px; height: 8px; background: #2f855a; border: 1px solid #fff; cursor: crosshair; z-index: 4; }
 </style>
 </head>
 <body>
@@ -42,11 +46,12 @@
   <button id="clearBtn" title="Clear cell">Clear</button>
 </div>
 <div class="fbar"><span id="cellName">A1</span><span>ƒx</span><input id="formula" aria-label="Formula bar" spellcheck="false"></div>
-<div class="grid-wrap"><table id="grid"></table></div>
-<div class="status" id="status">Formulas: SUM AVERAGE MIN MAX COUNT COUNTA ROUND ABS SQRT POWER MOD IF AND OR NOT CONCAT LEN UPPER LOWER TODAY</div>
+<div class="grid-wrap"><table id="grid"></table><div id="fillHandle" title="Drag to fill · double-click to fill down"></div></div>
+<div class="status" id="status"></div>
 
 <script src="common.js"></script>
 <script src="sheets-engine.js"></script>
+<script src="sheets-fill.js"></script>
 <script src="features.js"></script>
 <script>
 const ROWS = 100, COLS = 26;
@@ -98,13 +103,140 @@ function setCell(id, value) {
   render(); persist();
 }
 
+// Selection: `sel` is the active (focused) cell; `rangeEnd` is the other corner of the range.
+let rangeEnd = 'A1';
+const { parseId, toId } = SheetFill;
+function range() {
+  const a = parseId(sel), b = parseId(rangeEnd);
+  return { c1: Math.min(a.c, b.c), c2: Math.max(a.c, b.c), r1: Math.min(a.r, b.r), r2: Math.max(a.r, b.r) };
+}
+function cellsIn(rg) {
+  const out = [];
+  for (let r = rg.r1; r <= rg.r2; r++) for (let c = rg.c1; c <= rg.c2; c++) out.push(toId(c, r));
+  return out;
+}
+const HELP = 'Drag or Shift+click to select · drag the corner square to fill a series · Ctrl+D fill down · Ctrl+K commands';
+function paintSelection() {
+  grid.querySelectorAll('td.insel').forEach(td => td.classList.remove('insel'));
+  const rg = range(), cells = cellsIn(rg);
+  if (cells.length > 1) cells.forEach(id => inputs[id].parentElement.classList.add('insel'));
+  document.getElementById('cellName').textContent = cells.length > 1 ? `${toId(rg.c1, rg.r1)}:${toId(rg.c2, rg.r2)}` : sel;
+  // Status bar: quick stats for multi-cell selections.
+  const status = document.getElementById('status');
+  if (cells.length > 1) {
+    const values = computeAll(raw), nums = cells.map(id => values[id]).filter(v => typeof v === 'number');
+    const sum = nums.reduce((a, b) => a + b, 0);
+    status.textContent = nums.length ? `Sum: ${fmt(sum)} · Average: ${fmt(sum / nums.length)} · Count: ${nums.length} · Min: ${fmt(Math.min(...nums))} · Max: ${fmt(Math.max(...nums))}` : `${cells.length} cells selected`;
+  } else status.textContent = HELP;
+  const wrap = grid.parentElement, td = inputs[toId(rg.c2, rg.r2)].parentElement;
+  const w = wrap.getBoundingClientRect(), t = td.getBoundingClientRect();
+  Object.assign(document.getElementById('fillHandle').style, {
+    left: (t.right - w.left + wrap.scrollLeft - 5) + 'px', top: (t.bottom - w.top + wrap.scrollTop - 5) + 'px',
+  });
+}
+
 function select(id) {
   document.querySelector('td.sel')?.classList.remove('sel');
-  sel = id;
+  sel = id; rangeEnd = id;
   inputs[id].parentElement.classList.add('sel');
-  document.getElementById('cellName').textContent = id;
   formula.value = raw[id] ?? '';
+  paintSelection();
 }
+function extendTo(id) { rangeEnd = id; paintSelection(); }
+function clampId(c, r) { return toId(Math.min(COLS - 1, Math.max(0, c)), Math.min(ROWS, Math.max(1, r))); }
+
+// Apply many raw edits at once.
+function setCells(updates) {
+  for (const [id, v] of Object.entries(updates)) { if (v === '') delete raw[id]; else raw[id] = v; }
+  render(); persist(); paintSelection();
+}
+
+// Ctrl+D / Ctrl+R: copy the first row/column of the selection across it (or from the
+// cell above/left when a single cell is selected), shifting relative references.
+function copyFill(down) {
+  let rg = range();
+  if (rg.r1 === rg.r2 && rg.c1 === rg.c2) {
+    if (down && rg.r1 > 1) rg = { ...rg, r1: rg.r1 - 1 };
+    else if (!down && rg.c1 > 0) rg = { ...rg, c1: rg.c1 - 1 };
+    else return;
+  }
+  const updates = {};
+  for (const id of cellsIn(rg)) {
+    const { c, r } = parseId(id);
+    const srcId = down ? toId(c, rg.r1) : toId(rg.c1, r);
+    if (srcId === id) continue;
+    const v = raw[srcId] ?? '';
+    updates[id] = v.startsWith('=') ? SheetFill.shiftFormula(v, down ? r - rg.r1 : 0, down ? 0 : c - rg.c1) : v;
+  }
+  setCells(updates);
+}
+
+// ---- fill handle ----
+const handle = document.getElementById('fillHandle');
+let fillDest = null;
+function destFor(pointerId) {
+  const src = range(), p = parseId(pointerId);
+  const down = p.r - src.r2, up = src.r1 - p.r, right = p.c - src.c2, left = src.c1 - p.c;
+  const best = Math.max(down, up, right, left);
+  if (best <= 0) return null;
+  if (best === down) return { ...src, r2: p.r };
+  if (best === up) return { ...src, r1: p.r };
+  if (best === right) return { ...src, c2: p.c };
+  return { ...src, c1: p.c };
+}
+function previewFill(dest) {
+  grid.querySelectorAll('td.fillprev').forEach(td => td.classList.remove('fillprev'));
+  if (dest) cellsIn(dest).forEach(id => inputs[id].parentElement.classList.add('fillprev'));
+}
+function applyFill(dest) {
+  const src = range();
+  setCells(SheetFill.fill(raw, src, dest));
+  // Select the whole filled block, keeping the active cell at the source corner.
+  const anchor = toId(src.c1, src.r1);
+  inputs[anchor].focus(); // focusin resets the range, so extend after
+  extendTo(toId(dest.c1 === src.c1 ? dest.c2 : dest.c1, dest.r1 === src.r1 ? dest.r2 : dest.r1));
+}
+handle.addEventListener('mousedown', e => {
+  e.preventDefault();
+  document.activeElement?.blur?.(); // commit any edit in progress
+  const onMove = ev => {
+    const id = document.elementFromPoint(ev.clientX, ev.clientY)?.closest?.('td')?.querySelector('input')?.dataset.id;
+    if (id) { fillDest = destFor(id); previewFill(fillDest); }
+  };
+  const onUp = () => {
+    removeEventListener('mousemove', onMove); removeEventListener('mouseup', onUp);
+    previewFill(null);
+    if (fillDest) applyFill(fillDest);
+    fillDest = null;
+  };
+  addEventListener('mousemove', onMove); addEventListener('mouseup', onUp);
+});
+// Double-click: fill down as far as the neighbouring column has data.
+handle.addEventListener('dblclick', () => {
+  const src = range();
+  for (const col of [src.c1 - 1, src.c2 + 1]) {
+    if (col < 0 || col >= COLS) continue;
+    let r = src.r2;
+    while (r < ROWS && raw[toId(col, r + 1)] != null) r++;
+    if (r > src.r2) { applyFill({ ...src, r2: r }); return; }
+  }
+});
+
+// Mouse range selection: drag across cells, or Shift+click.
+let dragging = false;
+grid.addEventListener('mousedown', e => {
+  const id = e.target.dataset?.id; if (!id) return;
+  if (e.shiftKey) { e.preventDefault(); extendTo(id); return; }
+  if (id === sel) select(id); // plain click on the active cell collapses the range
+  dragging = true;
+});
+grid.addEventListener('mouseover', e => {
+  const id = e.target.dataset?.id;
+  if (dragging && id && e.buttons === 1 && (id !== rangeEnd)) { extendTo(id); window.getSelection()?.removeAllRanges(); }
+});
+addEventListener('mouseup', () => { dragging = false; });
+grid.parentElement.addEventListener('scroll', paintSelection);
+addEventListener('resize', paintSelection);
 
 function move(id, dr, dc) {
   const c = Math.min(COLS - 1, Math.max(0, id.charCodeAt(0) - 65 + dc));
@@ -114,7 +246,7 @@ function move(id, dr, dc) {
 
 grid.addEventListener('focusin', e => {
   const id = e.target.dataset.id; if (!id) return;
-  select(id);
+  if (id !== sel) select(id); // refocusing the active cell (e.g. after a dialog) keeps the range
   e.target.value = raw[id] ?? '';
   e.target.classList.remove('num', 'err');
   e.target.select(); // typing replaces the cell, like other spreadsheets
@@ -132,7 +264,20 @@ grid.addEventListener('keydown', e => {
   const id = e.target.dataset.id; if (!id) return;
   const atStart = e.target.selectionStart === 0 && e.target.selectionEnd === 0;
   const atEnd = e.target.selectionStart === e.target.value.length;
-  if (e.key === 'Enter') { e.preventDefault(); move(id, e.shiftKey ? -1 : 1, 0); }
+  const arrows = { ArrowUp: [-1, 0], ArrowDown: [1, 0], ArrowLeft: [0, -1], ArrowRight: [0, 1] };
+  const multi = cellsIn(range()).length > 1;
+  if (e.shiftKey && arrows[e.key]) {
+    e.preventDefault();
+    const end = parseId(rangeEnd), [dr, dc] = arrows[e.key];
+    extendTo(clampId(end.c + dc, end.r + dr));
+  }
+  else if ((e.ctrlKey || e.metaKey) && (e.key === 'd' || e.key === 'r')) { e.preventDefault(); e.target.blur(); copyFill(e.key === 'd'); inputs[id].focus(); }
+  else if (multi && (e.key === 'Delete' || e.key === 'Backspace')) {
+    e.preventDefault();
+    setCells(Object.fromEntries(cellsIn(range()).map(c => [c, ''])));
+    e.target.value = '';
+  }
+  else if (e.key === 'Enter') { e.preventDefault(); move(id, e.shiftKey ? -1 : 1, 0); }
   else if (e.key === 'Tab') { e.preventDefault(); move(id, 0, e.shiftKey ? -1 : 1); }
   else if (e.key === 'ArrowUp') { e.preventDefault(); move(id, -1, 0); }
   else if (e.key === 'ArrowDown') { e.preventDefault(); move(id, 1, 0); }
@@ -149,10 +294,17 @@ formula.addEventListener('change', () => setCell(sel, formula.value));
 titleEl.addEventListener('input', persist);
 
 document.getElementById('newBtn').onclick = () => { location.href = 'sheets.html?new'; };
-document.getElementById('boldBtn').onclick = () => {
-  bold[sel] = !bold[sel]; if (!bold[sel]) delete bold[sel]; render(); persist();
-};
-document.getElementById('clearBtn').onclick = () => { setCell(sel, ''); formula.value = ''; };
+function toggleBold() {
+  const on = !bold[sel];
+  for (const id of cellsIn(range())) { if (on) bold[id] = true; else delete bold[id]; }
+  render(); persist();
+}
+function clearSelection() {
+  setCells(Object.fromEntries(cellsIn(range()).map(c => [c, ''])));
+  formula.value = '';
+}
+document.getElementById('boldBtn').onclick = toggleBold;
+document.getElementById('clearBtn').onclick = clearSelection;
 document.getElementById('sumBtn').onclick = () => {
   const col = sel[0], row = parseInt(sel.slice(1), 10);
   let top = row - 1;
@@ -222,8 +374,36 @@ const validRaw = obj => Object.fromEntries(Object.entries(obj || {})
 raw = validRaw(DOC.state.raw); bold = DOC.state.bold || {};
 titleEl.value = String(DOC.state.title || 'Untitled spreadsheet');
 render(); select('A1');
+function goToCell() {
+  const id = (prompt('Go to cell (e.g. B12):') || '').toUpperCase().trim();
+  if (/^[A-Z]([1-9]\d?|100)$/.test(id)) { inputs[id].focus(); inputs[id].scrollIntoView({ block: 'center', inline: 'center' }); }
+}
+function startFormula(fn) {
+  const rg = range(), multi = cellsIn(rg).length > 1;
+  // With a range selected, put the function in the cell below it; otherwise start typing it.
+  if (multi && rg.c1 === rg.c2 && rg.r2 < ROWS) {
+    const target = toId(rg.c1, rg.r2 + 1);
+    setCells({ [target]: `=${fn}(${toId(rg.c1, rg.r1)}:${toId(rg.c2, rg.r2)})` });
+    inputs[target].focus();
+  } else { const inp = inputs[sel]; inp.focus(); inp.value = `=${fn}(`; formula.value = inp.value; }
+}
+const cmd = (name, run, hint, keywords) => ({ name, run, hint, keywords });
+const sheetCommands = () => [
+  cmd('Bold', toggleBold, '', 'strong'),
+  cmd('AutoSum', () => document.getElementById('sumBtn').click(), '', 'total sum'),
+  cmd('Clear selected cells', clearSelection, 'Delete', 'erase empty'),
+  cmd('Fill down', () => copyFill(true), 'Ctrl+D', 'copy'),
+  cmd('Fill right', () => copyFill(false), 'Ctrl+R', 'copy'),
+  cmd('Go to cell…', goToCell, '', 'jump navigate'),
+  ...['SUM', 'AVERAGE', 'MIN', 'MAX', 'COUNT', 'ROUND', 'IF', 'CONCAT'].map(fn => cmd(`Insert ${fn}()`, () => startFormula(fn), 'formula', 'function')),
+  cmd('Open file from computer', () => document.getElementById('openBtn').click(), '', 'import xlsx csv'),
+  cmd('Save as Excel (.xlsx)', () => document.getElementById('xlsxBtn').click(), '', 'download export'),
+  cmd('Save as CSV', () => document.getElementById('csvBtn').click(), '', 'download export'),
+];
+
 OpenDesk.setup({
   app: 'sheets',
+  commands: sheetCommands,
   key: DOC.key,
   id: DOC.id,
   isEmpty: () => !Object.keys(raw).length,

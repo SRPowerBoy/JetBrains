@@ -86,3 +86,16 @@ del { background: rgba(229,62,62,.2); color: inherit; }
 .live-table { border-collapse: collapse; font-size: inherit; }
 .live-table th, .live-table td { border: 1px solid #bbb; padding: 3px 8px; }
 .live-table th { background: #f0f5f2; }
+
+/* ---------- command palette ---------- */
+.modal-back:has(.palette) { place-items: start center; padding-top: 12vh; }
+.palette { max-width: 560px; }
+.palette .modal-head { display: none; }
+.palette .modal-body { padding: 10px; gap: 8px; }
+.palette #pq { font: inherit; font-size: 16px; padding: 10px 12px; border: 1px solid var(--border); border-radius: 6px; background: var(--bg); color: var(--text); outline: none; }
+.palette #pq:focus { border-color: var(--accent); }
+.palette .cmds { list-style: none; margin: 0; padding: 0; max-height: 50vh; overflow-y: auto; }
+.palette .cmds li { display: flex; justify-content: space-between; gap: 12px; padding: 7px 10px; border-radius: 5px; cursor: pointer; }
+.palette .cmds li.active { background: var(--accent); color: var(--accent-text); }
+.palette .cmds li.none { color: var(--muted); cursor: default; }
+.palette kbd { font: 11px system-ui, sans-serif; opacity: .75; align-self: center; }

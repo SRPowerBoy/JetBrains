@@ -32,7 +32,7 @@
   const colName = i => String.fromCharCode(65 + i);
 
   function tokenize(src) {
-    const re = /\s*(?:(\d+(?:\.\d+)?)|("(?:[^"]|"")*")|([A-Z]+\d+(?::[A-Z]+\d+)?)|([A-Z][A-Z0-9]*)(?=\s*\()|(<=|>=|<>|[-+*/^%&(),=<>:]))/gyi;
+    const re = /\s*(?:(\d+(?:\.\d+)?)|("(?:[^"]|"")*")|(\$?[A-Z]+\$?\d+(?::\$?[A-Z]+\$?\d+)?)|([A-Z][A-Z0-9]*)(?=\s*\()|(<=|>=|<>|[-+*/^%&(),=<>:]))/gyi;
     const tokens = [];
     let m;
     re.lastIndex = 0;
@@ -45,7 +45,7 @@
       }
       if (m[1]) tokens.push({ t: 'num', v: parseFloat(m[1]) });
       else if (m[2]) tokens.push({ t: 'str', v: m[2].slice(1, -1).replace(/""/g, '"') });
-      else if (m[3]) tokens.push({ t: 'ref', v: m[3].toUpperCase() });
+      else if (m[3]) tokens.push({ t: 'ref', v: m[3].toUpperCase().replace(/\$/g, '') }); // $ only matters when filling
       else if (m[4]) tokens.push({ t: 'fn', v: m[4].toUpperCase() });
       else tokens.push({ t: 'op', v: m[5] });
     }

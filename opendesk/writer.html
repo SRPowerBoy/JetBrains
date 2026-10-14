@@ -93,7 +93,12 @@ const titleEl = document.getElementById('title');
 const BLANK = { title: 'Untitled document', html: '' };
 const DOC = Docs.open('writer', BLANK);
 
-function exec(cmd, val = null) { page.focus(); document.execCommand(cmd, false, val); save(); }
+function exec(cmd, val) {
+  page.focus();
+  // Pass no value at all when there is none: some commands use it as an attribute (e.g. <hr id="null">).
+  if (val === undefined) document.execCommand(cmd); else document.execCommand(cmd, false, val);
+  save();
+}
 
 function updateStatus() {
   const words = (page.innerText.match(/\S+/g) || []).length;
@@ -189,8 +194,8 @@ const actions = {
 };
 document.querySelectorAll('[data-act]').forEach(b => b.addEventListener('click', () => actions[b.dataset.act]()));
 
-document.getElementById('saveAs').onchange = e => {
-  const fmt = e.target.value; e.target.value = '';
+document.getElementById('saveAs').onchange = e => { const fmt = e.target.value; e.target.value = ''; saveAs(fmt); };
+function saveAs(fmt) {
   const name = safeName(titleEl.value, 'document');
   if (fmt === 'doc') {
     // Word opens HTML saved with the msword MIME type and preserves formatting.
@@ -198,7 +203,86 @@ document.getElementById('saveAs').onchange = e => {
   } else if (fmt === 'html') download(name + '.html', wrapDoc(page.innerHTML), 'text/html');
   else if (fmt === 'txt') download(name + '.txt', page.innerText, 'text/plain');
   else if (fmt === 'pdf') window.print();
-};
+}
+
+// ---- Markdown shortcuts ----
+// At the start of a paragraph: "# " "## " "### " headings, "- " or "* " bullets, "1. " numbering,
+// "> " quote, "```" + space code block, "---" + Enter divider.
+// Inline, when the closing marker is typed: **bold**, *italic* or _italic_, ~~strike~~.
+const BLOCK_RULES = [
+  [/^###$/, () => exec('formatBlock', 'H3')],
+  [/^##$/, () => exec('formatBlock', 'H2')],
+  [/^#$/, () => exec('formatBlock', 'H1')],
+  [/^[-*]$/, () => exec('insertUnorderedList')],
+  [/^1[.)]$/, () => exec('insertOrderedList')],
+  [/^>$/, () => exec('formatBlock', 'BLOCKQUOTE')],
+  [/^```$/, () => exec('formatBlock', 'PRE')],
+];
+const INLINE_RULES = [
+  [/\*\*([^*\s](?:[^*]*[^*\s])?)\*\*$/, 'bold'],
+  [/(?:^|[^*\w])\*([^*\s](?:[^*]*[^*\s])?)\*$/, 'italic'],
+  [/(?:^|[^_\w])_([^_\s](?:[^_]*[^_\s])?)_$/, 'italic'],
+  [/~~([^~\s](?:[^~]*[^~\s])?)~~$/, 'strikeThrough'],
+];
+const TAG = { bold: 'b', italic: 'i', strikeThrough: 's' };
+
+function currentBlock() {
+  const sel = getSelection();
+  if (!sel.rangeCount || !sel.isCollapsed || !page.contains(sel.anchorNode)) return null;
+  let n = sel.anchorNode;
+  while (n && n !== page && !(n.nodeType === 1 && /^(P|DIV|H[1-6]|LI|BLOCKQUOTE|PRE)$/.test(n.tagName))) n = n.parentNode;
+  return n && n !== page ? n : null;
+}
+function textBeforeCaret(block) {
+  const r = getSelection().getRangeAt(0).cloneRange();
+  r.setStart(block, 0);
+  return r.toString();
+}
+function deleteBack(chars) {
+  const sel = getSelection();
+  for (let i = 0; i < chars; i++) sel.modify('extend', 'backward', 'character');
+  document.execCommand('delete');
+}
+
+page.addEventListener('input', e => {
+  if (e.inputType !== 'insertText' || !e.data) return;
+  const block = currentBlock();
+  if (!block) return;
+  const before = textBeforeCaret(block).replace(/ /g, ' ');
+
+  if (e.data === ' ' && /^(P|DIV)$/.test(block.tagName)) {
+    const marker = before.slice(0, -1);
+    const rule = BLOCK_RULES.find(([re]) => re.test(marker));
+    if (rule && before.length === marker.length + 1) { deleteBack(before.length); rule[1](); return; }
+  }
+
+  for (const [re, cmd] of INLINE_RULES) {
+    const m = re.exec(before);
+    if (!m) continue;
+    const full = m[0].replace(/^[^*_~]/, ''); // drop the boundary character the regex consumed
+    deleteBack(full.length);
+    const div = document.createElement('div'); div.textContent = m[1];
+    exec('insertHTML', `<${TAG[cmd]}>${div.innerHTML}</${TAG[cmd]}>`);
+    if (document.queryCommandState(cmd)) document.execCommand(cmd); // stop formatting what's typed next
+    return;
+  }
+});
+
+page.addEventListener('keydown', e => {
+  if (e.key !== 'Enter' || e.shiftKey) return;
+  const block = currentBlock();
+  // Enter on an empty quote/code line returns to normal text (browsers otherwise stay in it).
+  if (block && /^(BLOCKQUOTE|PRE)$/.test(block.tagName) && !block.textContent.trim()) {
+    e.preventDefault();
+    exec('formatBlock', 'P');
+    return;
+  }
+  if (block && /^(P|DIV)$/.test(block.tagName) && block.textContent.trim() === '---') {
+    e.preventDefault();
+    deleteBack(textBeforeCaret(block).length);
+    exec('insertHorizontalRule');
+  }
+});
 
 // ---- live spreadsheet blocks ----
 function refreshLive() {
@@ -253,8 +337,43 @@ function docToDeck() {
   return { slides };
 }
 
+const cmd = (name, run, hint, keywords) => ({ name, run, hint, keywords });
+const writerCommands = () => [
+  cmd('Bold', () => exec('bold'), 'Ctrl+B', 'strong **'),
+  cmd('Italic', () => exec('italic'), 'Ctrl+I', 'emphasis *'),
+  cmd('Underline', () => exec('underline'), 'Ctrl+U'),
+  cmd('Strikethrough', () => exec('strikeThrough'), '~~', 'cross out'),
+  cmd('Heading 1', () => exec('formatBlock', 'H1'), '# ', 'title h1'),
+  cmd('Heading 2', () => exec('formatBlock', 'H2'), '## ', 'h2 subtitle'),
+  cmd('Heading 3', () => exec('formatBlock', 'H3'), '### ', 'h3'),
+  cmd('Normal text', () => exec('formatBlock', 'P'), '', 'paragraph body'),
+  cmd('Quote', () => exec('formatBlock', 'BLOCKQUOTE'), '> ', 'blockquote'),
+  cmd('Code block', () => exec('formatBlock', 'PRE'), '``` ', 'monospace'),
+  cmd('Bulleted list', () => exec('insertUnorderedList'), '- ', 'bullets ul'),
+  cmd('Numbered list', () => exec('insertOrderedList'), '1. ', 'ol numbering'),
+  cmd('Align left', () => exec('justifyLeft')),
+  cmd('Align center', () => exec('justifyCenter'), '', 'centre middle'),
+  cmd('Align right', () => exec('justifyRight')),
+  cmd('Clear formatting', () => exec('removeFormat'), '', 'plain reset'),
+  cmd('Insert link', actions.link, '', 'url hyperlink'),
+  cmd('Insert image', actions.image, '', 'picture photo'),
+  cmd('Insert table', actions.table, '', 'grid'),
+  cmd('Insert divider', () => exec('insertHorizontalRule'), '---', 'horizontal rule hr line'),
+  cmd('Insert page break', actions.pagebreak),
+  cmd('Insert live spreadsheet data', actions.liveData, '', 'chart table sheets'),
+  cmd('Convert document to slides', actions.toSlides, '', 'presentation deck'),
+  cmd('Open file from computer', actions.open, '', 'import docx'),
+  cmd('Save as Word (.doc)', () => saveAs('doc'), 'Ctrl+S', 'download export'),
+  cmd('Save as web page (.html)', () => saveAs('html'), '', 'download export'),
+  cmd('Save as plain text (.txt)', () => saveAs('txt'), '', 'download export'),
+  cmd('Print / Save as PDF', () => saveAs('pdf'), '', 'export'),
+  cmd('Undo', () => exec('undo'), 'Ctrl+Z'),
+  cmd('Redo', () => exec('redo'), 'Ctrl+Y'),
+];
+
 OpenDesk.setup({
   app: 'writer',
+  commands: writerCommands,
   key: DOC.key,
   id: DOC.id,
   isEmpty: () => !page.innerText.trim() && !page.querySelector('img,table,.live-range'),

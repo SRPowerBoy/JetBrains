@@ -356,8 +356,29 @@ deck = DOC.state.deck?.slides?.length ? cleanDeck(DOC.state.deck) : { slides: [t
 titleEl.value = String(DOC.state.title || 'Untitled presentation');
 renderStage(); renderThumbs(); // no persist: just opening a file shouldn't mark it modified
 OpenDesk.onSheetChange(() => { if (deck.slides.some(s => s.items.some(i => i.type === 'live'))) render(); });
+const cmd = (name, run, hint, keywords) => ({ name, run, hint, keywords });
+const slideCommands = () => [
+  cmd('New slide', actions.addSlide, '', 'add'),
+  cmd('Duplicate slide', actions.dupSlide, '', 'copy'),
+  cmd('Delete slide', actions.delSlide, '', 'remove'),
+  cmd('Add text box', actions.addText, '', 'insert'),
+  cmd('Add image', actions.addImage, '', 'insert picture photo'),
+  cmd('Add live spreadsheet data', actions.addLive, '', 'chart table sheets'),
+  cmd('Delete selected box', actions.delBox, '', 'remove'),
+  cmd('Bold', actions.bold),
+  cmd('Present', actions.present, 'F5', 'slideshow start play'),
+  cmd('Export PowerPoint (.pptx)', actions.exportPptx, '', 'download save'),
+  cmd('Save as OpenDesk file', actions.saveDeck, '', 'download json'),
+  cmd('Open OpenDesk file', actions.openDeck, '', 'import json'),
+  ...deck.slides.map((sl, i) => {
+    const title = sl.items.find(it => it.type === 'text')?.text.split('\n')[0].slice(0, 40) || '';
+    return cmd(`Go to slide ${i + 1}${title ? ': ' + title : ''}`, () => { cur = i; selId = null; render(); }, '', 'jump');
+  }),
+];
+
 OpenDesk.setup({
   app: 'slides',
+  commands: slideCommands,
   key: DOC.key,
   id: DOC.id,
   isEmpty: () => JSON.stringify(deck.slides.map(s => s.items.map(i => i.text))) === JSON.stringify([titleSlide().items.map(i => i.text)]),

@@ -20,6 +20,13 @@ Work autosaves to your browser. The home page lists all your files (search, filt
 - **→ Document to slides.** One click in Writer turns a document into a new deck: headings become slide titles, paragraphs and list items become bullets (split across slides when long), live charts get their own slide.
 
 
+## Work faster
+
+- **⌘ Command palette — Ctrl+K (⌘K on Mac), every app.** Type any action ("bold", "heading 2", "insert sum", "present", "go to slide 4") or any file name to jump to it. Fuzzy matching; ↑↓ + Enter.
+- **Markdown shortcuts in Writer.** At the start of a line: `# ` `## ` `### ` headings, `- ` bullets, `1. ` numbering, `> ` quote, ` ``` ` code block, `---` + Enter divider. Inline: `**bold**`, `*italic*` / `_italic_`, `~~strike~~`. Enter on an empty quote/code line returns to normal text.
+- **Fill handle in Sheets.** Select cells, drag the green corner square to continue the pattern: `1, 2` → `3, 4…`, `Mon` → `Tue…`, `Jan, Mar` → `May…`, `Item 1` → `Item 2…`, dates (`2026-01-30` → `2026-01-31…`). Formulas shift their references (`$A$1` stays fixed). Double-click the square to fill down alongside the neighbouring column. **Ctrl+D / Ctrl+R** copy down/right.
+- **Range selection in Sheets.** Drag, Shift+click or Shift+arrows. Bold/Clear/Delete apply to the whole range; the status bar shows Sum · Average · Count · Min · Max.
+
 ## Run it
 
 It's static files. Open `index.html` through any static server:

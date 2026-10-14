@@ -327,6 +327,71 @@ const OpenDesk = (() => {
     addEventListener('focus', fn);
   }
 
+  // ---------- command palette (Ctrl+K) ----------
+  // Commands: { name, run, hint?, keywords? }. Apps pass theirs via setup({ commands: () => [...] }).
+  function globalCommands() {
+    const label = { writer: 'document', sheets: 'spreadsheet', slides: 'presentation' };
+    return [
+      { name: 'Share by link', run: openShareDialog, keywords: 'send copy url' },
+      { name: 'Version history', run: openHistoryDialog, keywords: 'undo restore diff changes' },
+      { name: 'Home — all files', run: () => { location.href = 'index.html'; }, keywords: 'files list open' },
+      ...['writer', 'sheets', 'slides'].map(app => ({ name: `New ${label[app]}`, run: () => { location.href = app + '.html?new'; }, keywords: 'create blank' })),
+      ...Docs.list().filter(d => d.id !== cfg.id && label[d.app])
+        .map(d => ({ name: `Open: ${d.title}`, hint: label[d.app], run: () => { location.href = Docs.url(d.app, d.id); }, keywords: 'file switch' })),
+    ];
+  }
+
+  // Ranks a command: contiguous match beats word-start match beats scattered letters.
+  function score(cmd, q) {
+    if (!q) return 1;
+    const name = cmd.name.toLowerCase(), hay = name + ' ' + (cmd.keywords || '');
+    const at = name.indexOf(q);
+    if (at === 0) return 1000;
+    if (at > 0) return 800 - at + (/\W/.test(name[at - 1]) ? 100 : 0);
+    if (hay.includes(q)) return 500;
+    let i = 0;
+    for (const ch of hay) if (ch === q[i]) i++;
+    return i === q.length ? 100 - hay.length / 10 : 0;
+  }
+
+  function openPalette() {
+    if (document.querySelector('.palette')) return;
+    // Remember the text selection so commands like Bold apply to it after the palette closes.
+    const sel = getSelection(), saved = sel.rangeCount ? sel.getRangeAt(0).cloneRange() : null;
+    const focused = document.activeElement;
+    const m = modal('Commands');
+    m.body.closest('.modal').classList.add('palette');
+    m.body.innerHTML = `<input id="pq" placeholder="Type a command or file name…" aria-label="Command" autocomplete="off" spellcheck="false">
+      <ul class="cmds" role="listbox"></ul><p class="hint">↑↓ to choose · Enter to run · Esc to close</p>`;
+    const input = m.body.querySelector('#pq'), list = m.body.querySelector('.cmds');
+    const all = [...(cfg.commands?.() || []), ...globalCommands()];
+    let shown = [], active = 0;
+    const draw = () => {
+      const q = input.value.trim().toLowerCase();
+      shown = all.map(c => [c, score(c, q)]).filter(([, sc]) => sc > 0).sort((a, b) => b[1] - a[1]).slice(0, 50).map(([c]) => c);
+      active = Math.min(active, Math.max(0, shown.length - 1));
+      list.innerHTML = shown.length ? shown.map((c, i) => `<li role="option" data-i="${i}" class="${i === active ? 'active' : ''}" aria-selected="${i === active}">
+        <span>${esc(c.name)}</span>${c.hint ? `<kbd>${esc(c.hint)}</kbd>` : ''}</li>`).join('') : '<li class="none">No matching commands</li>';
+      list.querySelector('.active')?.scrollIntoView({ block: 'nearest' });
+    };
+    const run = i => {
+      const cmd = shown[i]; if (!cmd) return;
+      m.close();
+      if (focused && focused !== document.body) focused.focus();
+      if (saved) { sel.removeAllRanges(); sel.addRange(saved); }
+      cmd.run();
+    };
+    input.oninput = () => { active = 0; draw(); };
+    input.onkeydown = e => {
+      if (e.key === 'ArrowDown') { e.preventDefault(); active = Math.min(active + 1, shown.length - 1); draw(); }
+      else if (e.key === 'ArrowUp') { e.preventDefault(); active = Math.max(active - 1, 0); draw(); }
+      else if (e.key === 'Enter') { e.preventDefault(); run(active); }
+    };
+    list.onclick = e => { const li = e.target.closest('li[data-i]'); if (li) run(+li.dataset.i); };
+    draw();
+    input.focus();
+  }
+
   // ---------- setup ----------
   function setup(options) {
     cfg = options;
@@ -334,13 +399,17 @@ const OpenDesk = (() => {
     const sep = document.createElement('span'); sep.className = 'sep';
     const share = document.createElement('button'); share.textContent = '🔗 Share'; share.title = 'Share by link — no upload';
     const hist = document.createElement('button'); hist.textContent = '🕘 History'; hist.title = 'Version history';
-    share.onclick = openShareDialog; hist.onclick = openHistoryDialog;
-    bar.append(sep, share, hist);
+    const cmd = document.createElement('button'); cmd.textContent = '⌘ Commands'; cmd.title = 'Command palette (Ctrl+K)';
+    share.onclick = openShareDialog; hist.onclick = openHistoryDialog; cmd.onclick = openPalette;
+    bar.append(sep, cmd, share, hist);
+    addEventListener('keydown', e => {
+      if ((e.ctrlKey || e.metaKey) && !e.shiftKey && !e.altKey && e.key.toLowerCase() === 'k') { e.preventDefault(); openPalette(); }
+    }, true);
     snapshot('Opened');
     setInterval(() => snapshot('Autosave'), 60000);
     document.addEventListener('visibilitychange', () => { if (document.hidden) snapshot('Autosave'); });
     openIncomingShare();
   }
 
-  return { setup, pushHistory, renderLive, rangeRows, chartData, askRange, onSheetChange, diffWords, encodeShare, decodeShare, fmt };
+  return { openPalette, score, setup, pushHistory, renderLive, rangeRows, chartData, askRange, onSheetChange, diffWords, encodeShare, decodeShare, fmt };
 })();
