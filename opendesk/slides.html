@@ -20,6 +20,10 @@
   .box { position: absolute; padding: 6px; border: 1px dashed transparent; outline: none; white-space: pre-wrap; word-wrap: break-word; line-height: 1.2; }
   #stage .box:hover { border-color: #aaa; }
   #stage .box.selected { border: 1px solid #c05621; resize: both; overflow: hidden; }
+  .box.live { background: #fff; overflow: hidden; font: 14px Calibri, Carlito, sans-serif; color: #222; display: flex; flex-direction: column; }
+  .box.live svg { flex: 1; min-height: 0; height: 100% !important; }
+  .box.live .live-table { width: 100%; }
+  #present .live-tag, .thumb .live-tag { visibility: hidden; }
   .box img { width: 100%; height: 100%; object-fit: contain; pointer-events: none; }
   /* Inside the box: .selected uses overflow:hidden (required by resize), which would clip an outside handle. */
   .handle { position: absolute; top: 0; right: 0; height: 18px; line-height: 18px; padding: 0 6px; font: 11px system-ui, sans-serif; font-weight: 400; background: #c05621; color: #fff; cursor: move; border-radius: 0 0 0 3px; user-select: none; }
@@ -45,6 +49,7 @@
   <span class="sep"></span>
   <button data-act="addText">Text box</button>
   <button data-act="addImage">Image</button>
+  <button data-act="addLive" title="Table or chart that stays in sync with your spreadsheet">⇄ Sheet data</button>
   <button data-act="delBox">Delete box</button>
   <select id="fsize" aria-label="Font size"><option>14</option><option>18</option><option selected>24</option><option>32</option><option>44</option><option>60</option></select>
   <button data-act="bold"><b>B</b></button>
@@ -61,6 +66,8 @@
 <div id="present" class="hidden"></div>
 
 <script src="common.js"></script>
+<script src="sheets-engine.js"></script>
+<script src="features.js"></script>
 <script>
 const KEY = 'opendesk.slides';
 const W = 960, H = 540;
@@ -90,6 +97,9 @@ function boxEl(item, editable) {
   Object.assign(el.style, { left: item.x + 'px', top: item.y + 'px', width: item.w + 'px', height: item.h + 'px' });
   if (item.type === 'image') {
     const img = document.createElement('img'); img.src = item.src; el.appendChild(img);
+  } else if (item.type === 'live') {
+    el.classList.add('live');
+    el.innerHTML = OpenDesk.renderLive(item.range, item.mode);
   } else {
     el.textContent = item.text;
     Object.assign(el.style, { fontSize: item.size + 'px', color: item.color, fontWeight: item.bold ? '700' : '400', fontFamily: 'Calibri, Carlito, sans-serif' });
@@ -216,7 +226,7 @@ const actions = {
     try {
       const data = JSON.parse(await file.text());
       if (!Array.isArray(data.deck?.slides)) throw new Error();
-      deck = data.deck; titleEl.value = data.title || 'Untitled presentation'; cur = 0; selId = null; render();
+      deck = cleanDeck(data.deck); titleEl.value = data.title || 'Untitled presentation'; cur = 0; selId = null; render();
     } catch { alert('That file is not an OpenDesk presentation.'); }
   },
   saveDeck() {
@@ -232,7 +242,15 @@ const actions = {
       ps.background = { color: s.bg.replace('#', '') };
       for (const it of s.items) {
         const pos = { x: it.x * k, y: it.y * k, w: it.w * k, h: it.h * k };
-        if (it.type === 'image') ps.addImage({ data: it.src, ...pos, sizing: { type: 'contain', w: pos.w, h: pos.h } });
+        if (it.type === 'live') {
+          const rows = OpenDesk.rangeRows(it.range) || [['']];
+          if (it.mode === 'chart') {
+            const { labels, values } = OpenDesk.chartData(rows);
+            if (values.length) ps.addChart(pptx.ChartType.bar, [{ name: it.range, labels, values }], { ...pos, showValue: true, chartColors: ['2B6CB0'] });
+          } else {
+            ps.addTable(rows.map(r => r.map(v => ({ text: OpenDesk.fmt(v) }))), { ...pos, fontSize: 12, border: { type: 'solid', pt: 0.5, color: 'BBBBBB' } });
+          }
+        } else if (it.type === 'image') ps.addImage({ data: it.src, ...pos, sizing: { type: 'contain', w: pos.w, h: pos.h } });
         // px -> pt: 1px = 0.75pt at 96dpi, and the slide is 960px over 720pt.
         else ps.addText(it.text, { ...pos, fontSize: Math.round(it.size * 0.75), color: it.color.replace('#', ''), bold: it.bold, fontFace: 'Calibri', valign: 'top', margin: 4 });
       }
@@ -262,6 +280,12 @@ const actions = {
       deck.slides[cur].items.push(it); selId = it.id; render();
     };
     reader.readAsDataURL(file);
+  },
+  async addLive() {
+    const choice = await OpenDesk.askRange();
+    if (!choice) return;
+    const it = { id: uid(), type: 'live', range: choice.range, mode: choice.mode, x: 180, y: 120, w: 600, h: 340 };
+    deck.slides[cur].items.push(it); selId = it.id; render();
   },
   delBox() {
     if (!selId) return;
@@ -305,10 +329,36 @@ document.addEventListener('keydown', e => {
   } else if (e.key === 'F5') { e.preventDefault(); actions.present(); }
 });
 
+// Validate decks from files and share links: only known item types, only image data URLs.
+function cleanDeck(d) {
+  const num = (v, def) => (Number.isFinite(+v) ? +v : def);
+  const color = (v, def) => (/^#[0-9a-f]{6}$/i.test(v) ? v : def);
+  const slides = (Array.isArray(d?.slides) ? d.slides : []).map(s => ({
+    bg: color(s?.bg, '#ffffff'),
+    items: (Array.isArray(s?.items) ? s.items : []).map(it => {
+      const base = { id: uid(), x: num(it.x, 100), y: num(it.y, 100), w: num(it.w, 300), h: num(it.h, 100) };
+      if (it.type === 'image' && /^data:image\/(png|jpe?g|gif|webp);/.test(it.src)) return { ...base, type: 'image', src: it.src };
+      if (it.type === 'live' && /^[A-Z]\d{1,3}(:[A-Z]\d{1,3})?$/.test(it.range)) return { ...base, type: 'live', range: it.range, mode: it.mode === 'chart' ? 'chart' : 'table' };
+      if (it.type === 'text') return { ...base, type: 'text', text: String(it.text ?? ''), size: num(it.size, 24), color: color(it.color, '#222222'), bold: !!it.bold };
+      return null;
+    }).filter(Boolean),
+  }));
+  return { slides: slides.length ? slides : [titleSlide()] };
+}
+
 const saved = Store.get(KEY);
-deck = saved?.deck?.slides?.length ? saved.deck : { slides: [titleSlide()] };
+deck = saved?.deck?.slides?.length ? cleanDeck(saved.deck) : { slides: [titleSlide()] };
 if (saved?.title) titleEl.value = saved.title;
 render();
+OpenDesk.onSheetChange(() => { if (deck.slides.some(s => s.items.some(i => i.type === 'live'))) render(); });
+OpenDesk.setup({
+  app: 'slides',
+  key: KEY,
+  getState: () => ({ title: titleEl.value, deck }),
+  setState: st => { deck = cleanDeck(st.deck); titleEl.value = String(st.title || 'Untitled presentation'); cur = 0; selId = null; render(); },
+  toText: st => (st.title || '') + '\n\n' + (st.deck?.slides || []).map((s, i) =>
+    `— Slide ${i + 1} —\n` + (s.items || []).map(it => it.type === 'text' ? it.text : it.type === 'live' ? `[live ${it.range} ${it.mode}]` : '[image]').join('\n')).join('\n\n'),
+});
 </script>
 </body>
 </html>

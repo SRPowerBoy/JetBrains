@@ -50,3 +50,39 @@ select { border-color: var(--border); background: var(--panel); }
 input[type="color"] { width: 28px; height: 24px; padding: 0; border: 1px solid var(--border); background: none; }
 .status { padding: 4px 16px; font-size: 12px; color: var(--muted); background: var(--panel); border-top: 1px solid var(--border); }
 .hidden { display: none !important; }
+
+/* ---------- dialogs (share, history, live data) ---------- */
+.modal-back { position: fixed; inset: 0; background: rgba(0,0,0,.45); display: grid; place-items: center; z-index: 50; padding: 16px; }
+.modal { background: var(--panel); color: var(--text); border-radius: 10px; width: 100%; max-width: 480px; max-height: 90vh; display: flex; flex-direction: column; box-shadow: 0 10px 40px rgba(0,0,0,.35); }
+.modal.wide { max-width: 900px; height: 80vh; }
+.modal-head { display: flex; align-items: center; justify-content: space-between; padding: 12px 16px; border-bottom: 1px solid var(--border); }
+.modal-head h2 { margin: 0; font-size: 16px; }
+.modal-body { padding: 16px; overflow: auto; display: flex; flex-direction: column; gap: 12px; flex: 1; min-height: 0; }
+.modal .hint { margin: 0; color: var(--muted); font-size: 13px; }
+.modal .hint.warn { color: #c05621; }
+.modal .field { display: flex; flex-direction: column; gap: 4px; font-size: 13px; }
+.modal .field input, .modal .field select, .modal .row input { font: inherit; padding: 6px 8px; border: 1px solid var(--border); border-radius: 4px; background: var(--bg); color: var(--text); }
+.modal .row { display: flex; gap: 8px; }
+.modal .row input { flex: 1; min-width: 0; }
+button.primary { background: var(--accent); color: var(--accent-text); border-color: var(--accent); align-self: flex-start; padding: 6px 14px; }
+button.primary:hover { filter: brightness(1.1); background: var(--accent); }
+.modal .preview { border: 1px dashed var(--border); border-radius: 6px; padding: 8px; background: #fff; color: #222; max-height: 240px; overflow: auto; }
+
+.history { display: flex; gap: 12px; flex: 1; min-height: 0; }
+.history .versions { width: 200px; flex-shrink: 0; overflow-y: auto; display: flex; flex-direction: column; gap: 4px; }
+.history .versions button { display: flex; flex-direction: column; align-items: flex-start; text-align: left; border-color: var(--border); }
+.history .versions button span { font-size: 12px; color: var(--muted); }
+.history .versions button.active { border-color: var(--accent); background: var(--hover); }
+.history .diffpane { flex: 1; display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.history .diff { flex: 1; overflow: auto; white-space: pre-wrap; word-wrap: break-word; font-size: 13px; padding: 10px; border: 1px solid var(--border); border-radius: 6px; background: var(--bg); }
+.legend { font-size: 12px; color: var(--muted); }
+ins { background: rgba(56,161,105,.25); color: inherit; text-decoration: none; }
+del { background: rgba(229,62,62,.2); color: inherit; }
+.gap { color: var(--muted); }
+@media (max-width: 640px) { .history { flex-direction: column; } .history .versions { width: auto; max-height: 30%; } }
+
+/* ---------- live spreadsheet blocks ---------- */
+.live-tag { font: 11px system-ui, sans-serif; color: #2f855a; margin-bottom: 4px; user-select: none; }
+.live-table { border-collapse: collapse; font-size: inherit; }
+.live-table th, .live-table td { border: 1px solid #bbb; padding: 3px 8px; }
+.live-table th { background: #f0f5f2; }

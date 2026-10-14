@@ -45,6 +45,7 @@
 
 <script src="common.js"></script>
 <script src="sheets-engine.js"></script>
+<script src="features.js"></script>
 <script>
 const ROWS = 100, COLS = 26, KEY = 'opendesk.sheets';
 const { computeAll, colName } = SheetEngine;
@@ -86,7 +87,7 @@ function render() {
 let saveTimer;
 function persist() {
   clearTimeout(saveTimer);
-  saveTimer = setTimeout(() => Store.set(KEY, { title: titleEl.value, raw, bold }), 300);
+  saveTimer = setTimeout(() => Store.set(KEY, { title: titleEl.value, raw, bold }), 100);
 }
 
 function setCell(id, value) {
@@ -113,6 +114,7 @@ grid.addEventListener('focusin', e => {
   select(id);
   e.target.value = raw[id] ?? '';
   e.target.classList.remove('num', 'err');
+  e.target.select(); // typing replaces the cell, like other spreadsheets
 });
 grid.addEventListener('focusout', e => {
   const id = e.target.dataset.id; if (!id) return;
@@ -217,6 +219,24 @@ document.getElementById('csvBtn').onclick = () => {
 const saved = Store.get(KEY);
 if (saved) { raw = saved.raw || {}; bold = saved.bold || {}; titleEl.value = saved.title || titleEl.value; }
 render(); select('A1');
+
+const validRaw = obj => Object.fromEntries(Object.entries(obj || {})
+  .filter(([k, v]) => /^[A-Z]\d{1,3}$/.test(k) && typeof v === 'string'));
+OpenDesk.setup({
+  app: 'sheets',
+  key: KEY,
+  getState: () => ({ title: titleEl.value, raw, bold }),
+  setState: st => {
+    raw = validRaw(st.raw); bold = {};
+    for (const k in st.bold || {}) if (k in raw) bold[k] = true;
+    titleEl.value = String(st.title || 'Untitled spreadsheet');
+    Store.set(KEY, { title: titleEl.value, raw, bold });
+    render(); select('A1');
+  },
+  toText: st => (st.title || '') + '\n\n' + Object.keys(st.raw || {})
+    .sort((a, b) => (+a.slice(1) - +b.slice(1)) || a.localeCompare(b))
+    .map(k => `${k}: ${st.raw[k]}`).join('\n'),
+});
 </script>
 </body>
 </html>
