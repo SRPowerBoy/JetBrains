@@ -333,6 +333,7 @@ const OpenDesk = (() => {
     const label = { writer: 'document', sheets: 'spreadsheet', slides: 'presentation' };
     return [
       { name: 'Share by link', run: openShareDialog, keywords: 'send copy url' },
+      ...(cfg.find ? [{ name: 'Find and replace', run: () => openFind(cfg.find), hint: 'Ctrl+H', keywords: 'search substitute' }] : []),
       { name: 'Version history', run: openHistoryDialog, keywords: 'undo restore diff changes' },
       { name: 'Home — all files', run: () => { location.href = 'index.html'; }, keywords: 'files list open' },
       ...['writer', 'sheets', 'slides'].map(app => ({ name: `New ${label[app]}`, run: () => { location.href = app + '.html?new'; }, keywords: 'create blank' })),
@@ -392,6 +393,62 @@ const OpenDesk = (() => {
     input.focus();
   }
 
+  // ---------- find & replace ----------
+  // Apps provide an adapter: { find(q, matchCase) -> matches[], show(match), replace(match, text), replaceAll(q, text, matchCase) -> count }.
+  let findBar = null;
+  function openFind(adapter, withReplace = true) {
+    if (findBar) { findBar.querySelector('#fq').select(); findBar.querySelector('#fq').focus(); return; }
+    const bar = document.createElement('div');
+    bar.className = 'findbar';
+    bar.setAttribute('role', 'search');
+    bar.innerHTML = `
+      <div class="row"><input id="fq" placeholder="Find" aria-label="Find" spellcheck="false"><span id="fcount" aria-live="polite"></span>
+        <button id="fprev" title="Previous (Shift+Enter)" aria-label="Previous">↑</button><button id="fnext" title="Next (Enter)" aria-label="Next">↓</button>
+        <label title="Match case"><input type="checkbox" id="fcase"> Aa</label><button id="fclose" aria-label="Close">✕</button></div>
+      <div class="row${withReplace ? '' : ' hidden'}" id="frow"><input id="fr" placeholder="Replace with" aria-label="Replace with" spellcheck="false">
+        <button id="frep">Replace</button><button id="fall">Replace all</button></div>`;
+    document.body.appendChild(bar);
+    findBar = bar;
+    const q = bar.querySelector('#fq'), r = bar.querySelector('#fr'), mc = bar.querySelector('#fcase'), count = bar.querySelector('#fcount');
+    let matches = [], idx = -1;
+    const refresh = (keepIdx) => {
+      matches = q.value ? adapter.find(q.value, mc.checked) : [];
+      idx = matches.length ? Math.min(keepIdx ?? 0, matches.length - 1) : -1;
+      if (idx >= 0) adapter.show(matches[idx]);
+      count.textContent = q.value ? (matches.length ? `${idx + 1} of ${matches.length}` : 'No results') : '';
+    };
+    const step = d => {
+      if (!matches.length) return;
+      idx = (idx + d + matches.length) % matches.length;
+      adapter.show(matches[idx]);
+      count.textContent = `${idx + 1} of ${matches.length}`;
+    };
+    q.oninput = () => refresh(0); mc.onchange = () => refresh(0);
+    q.onkeydown = e => { if (e.key === 'Enter') { e.preventDefault(); step(e.shiftKey ? -1 : 1); } };
+    bar.querySelector('#fnext').onclick = () => step(1);
+    bar.querySelector('#fprev').onclick = () => step(-1);
+    bar.querySelector('#frep').onclick = () => {
+      if (idx < 0) return;
+      adapter.replace(matches[idx], r.value);
+      refresh(idx);
+      r.focus();
+    };
+    bar.querySelector('#fall').onclick = () => {
+      if (!q.value) return;
+      snapshot('Before replace all');
+      const n = adapter.replaceAll(q.value, r.value, mc.checked);
+      refresh(0);
+      count.textContent = `Replaced ${n}`;
+    };
+    const close = () => { adapter.close?.(); bar.remove(); findBar = null; removeEventListener('keydown', onEsc, true); };
+    const onEsc = e => { if (e.key === 'Escape' && bar.contains(document.activeElement)) { e.preventDefault(); close(); } };
+    addEventListener('keydown', onEsc, true);
+    bar.querySelector('#fclose').onclick = close;
+    const selected = String(getSelection() || '').trim();
+    if (selected && !selected.includes('\n') && selected.length < 100) { q.value = selected; refresh(0); }
+    q.focus(); q.select();
+  }
+
   // ---------- setup ----------
   function setup(options) {
     cfg = options;
@@ -403,13 +460,21 @@ const OpenDesk = (() => {
     share.onclick = openShareDialog; hist.onclick = openHistoryDialog; cmd.onclick = openPalette;
     bar.append(sep, cmd, share, hist);
     addEventListener('keydown', e => {
-      if ((e.ctrlKey || e.metaKey) && !e.shiftKey && !e.altKey && e.key.toLowerCase() === 'k') { e.preventDefault(); openPalette(); }
+      if (!(e.ctrlKey || e.metaKey) || e.shiftKey || e.altKey) return;
+      const k = e.key.toLowerCase();
+      if (k === 'k') { e.preventDefault(); openPalette(); }
+      else if (cfg.find && (k === 'h' || (k === 'f' && cfg.overrideFind))) { e.preventDefault(); openFind(cfg.find, k === 'h'); }
     }, true);
+    if (cfg.find) {
+      const fb = document.createElement('button'); fb.textContent = '🔍 Find'; fb.title = 'Find & replace (Ctrl+H)';
+      fb.onclick = () => openFind(cfg.find);
+      bar.insertBefore(fb, cmd);
+    }
     snapshot('Opened');
     setInterval(() => snapshot('Autosave'), 60000);
     document.addEventListener('visibilitychange', () => { if (document.hidden) snapshot('Autosave'); });
     openIncomingShare();
   }
 
-  return { openPalette, score, setup, pushHistory, renderLive, rangeRows, chartData, askRange, onSheetChange, diffWords, encodeShare, decodeShare, fmt };
+  return { openFind, openPalette, score, setup, pushHistory, renderLive, rangeRows, chartData, askRange, onSheetChange, diffWords, encodeShare, decodeShare, fmt };
 })();

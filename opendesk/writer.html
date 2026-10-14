@@ -337,6 +337,41 @@ function docToDeck() {
   return { slides };
 }
 
+// Find & replace over the page's text (live spreadsheet blocks are skipped; matches don't span formatting changes).
+const hasHighlights = !!(window.Highlight && CSS.highlights);
+const writerFind = {
+  find(q, matchCase) {
+    const out = [], needle = matchCase ? q : q.toLowerCase();
+    const walker = document.createTreeWalker(page, NodeFilter.SHOW_TEXT, {
+      acceptNode: n => (n.parentElement.closest('.live-range') ? NodeFilter.FILTER_REJECT : NodeFilter.FILTER_ACCEPT),
+    });
+    for (let n; (n = walker.nextNode());) {
+      const hay = matchCase ? n.data : n.data.toLowerCase();
+      for (let i = hay.indexOf(needle); needle && i >= 0; i = hay.indexOf(needle, i + needle.length)) {
+        const r = document.createRange(); r.setStart(n, i); r.setEnd(n, i + q.length); out.push(r);
+      }
+    }
+    if (hasHighlights) CSS.highlights.set('find-all', new Highlight(...out));
+    return out;
+  },
+  show(r) {
+    if (hasHighlights) CSS.highlights.set('find-current', new Highlight(r));
+    r.startContainer.parentElement.scrollIntoView({ block: 'center' });
+  },
+  replace(r, text) {
+    const sel = getSelection();
+    page.focus(); sel.removeAllRanges(); sel.addRange(r);
+    if (text) document.execCommand('insertText', false, text); else document.execCommand('delete');
+    save();
+  },
+  replaceAll(q, text, matchCase) {
+    const all = this.find(q, matchCase);
+    for (const r of all.reverse()) this.replace(r, text); // back to front keeps earlier offsets valid
+    return all.length;
+  },
+  close() { if (hasHighlights) { CSS.highlights.delete('find-all'); CSS.highlights.delete('find-current'); } },
+};
+
 const cmd = (name, run, hint, keywords) => ({ name, run, hint, keywords });
 const writerCommands = () => [
   cmd('Bold', () => exec('bold'), 'Ctrl+B', 'strong **'),
@@ -374,6 +409,7 @@ const writerCommands = () => [
 OpenDesk.setup({
   app: 'writer',
   commands: writerCommands,
+  find: writerFind,
   key: DOC.key,
   id: DOC.id,
   isEmpty: () => !page.innerText.trim() && !page.querySelector('img,table,.live-range'),

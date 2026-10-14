@@ -25,6 +25,10 @@ Work autosaves to your browser. The home page lists all your files (search, filt
 - **⌘ Command palette — Ctrl+K (⌘K on Mac), every app.** Type any action ("bold", "heading 2", "insert sum", "present", "go to slide 4") or any file name to jump to it. Fuzzy matching; ↑↓ + Enter.
 - **Markdown shortcuts in Writer.** At the start of a line: `# ` `## ` `### ` headings, `- ` bullets, `1. ` numbering, `> ` quote, ` ``` ` code block, `---` + Enter divider. Inline: `**bold**`, `*italic*` / `_italic_`, `~~strike~~`. Enter on an empty quote/code line returns to normal text.
 - **Fill handle in Sheets.** Select cells, drag the green corner square to continue the pattern: `1, 2` → `3, 4…`, `Mon` → `Tue…`, `Jan, Mar` → `May…`, `Item 1` → `Item 2…`, dates (`2026-01-30` → `2026-01-31…`). Formulas shift their references (`$A$1` stays fixed). Double-click the square to fill down alongside the neighbouring column. **Ctrl+D / Ctrl+R** copy down/right.
+- **Templates.** Resume, cover letter, meeting notes, invoice (totals and tax calculated), monthly budget, pitch deck — one click from the home page.
+- **Copy & paste ranges in Sheets.** Paste from Excel, Google Sheets or any web table and it lands in cells (`1,200` becomes a number). Copy a range out as tab-separated text; copying between OpenDesk sheets keeps formulas and shifts their references. Ctrl+X cuts.
+- **Find & replace — Ctrl+H** in Writer and Sheets (Ctrl+F too in Sheets, since the browser's own find can't see inside cells). Match case, next/previous, replace one or all; Replace all snapshots history first.
+- **Search inside files** from the home page — matches file contents, not just names, with a snippet.
 - **Range selection in Sheets.** Drag, Shift+click or Shift+arrows. Bold/Clear/Delete apply to the whole range; the status bar shows Sum · Average · Count · Min · Max.
 
 ## Run it
@@ -45,6 +49,7 @@ Or host it free on GitHub Pages: `.github/workflows/pages.yml` deploys the `open
 - Writer saves Word-compatible HTML as `.doc`, not real `.docx`. `.docx` import drops some layout (mammoth focuses on structure).
 - Sheets: one sheet, A1:Z100, no charts, no cell formatting beyond bold.
 - Slides cannot import `.pptx` yet.
+- Writer find doesn't match text that spans a formatting change (e.g. half-bold words).
 - Bundled libraries: mammoth 1.6.0, SheetJS 0.18.5, PptxGenJS 3.12.0 (licenses in `vendor/`).
 
 ## License

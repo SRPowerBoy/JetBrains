@@ -37,6 +37,15 @@
   .meter { width: 140px; height: 6px; background: var(--border); border-radius: 3px; overflow: hidden; display: inline-block; vertical-align: middle; }
   .meter i { display: block; height: 100%; background: var(--accent); }
   footer.bar .spacer { flex: 1; }
+  h2.sec { margin: 0 0 12px; font-size: 18px; }
+  .templates { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 10px; }
+  .templates button { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; text-align: left; padding: 12px; background: var(--panel); border: 1px solid var(--border); border-radius: 8px; }
+  .templates button:hover { border-color: var(--accent); }
+  .templates .tag { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: .04em; }
+  .templates .tag.writer { color: #2b6cb0; } .templates .tag.sheets { color: #2f855a; } .templates .tag.slides { color: #c05621; }
+  .templates span.d { font-size: 12px; color: var(--muted); }
+  ul.files a span.snip { font-style: italic; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  ul.files mark { background: rgba(214,158,46,.35); color: inherit; }
 </style>
 </head>
 <body>
@@ -51,10 +60,14 @@
     <a href="slides.html?new"><div class="icon slides">P</div><div><strong>New presentation</strong><span>Slides · exports .pptx</span></div></a>
   </div>
   <section>
+    <h2 class="sec">Start from a template</h2>
+    <div class="templates" id="templates"></div>
+  </section>
+  <section>
     <div class="files-head">
       <h2>Your files</h2>
       <select id="filter" aria-label="Filter by type"><option value="">All types</option><option value="writer">Documents</option><option value="sheets">Spreadsheets</option><option value="slides">Presentations</option></select>
-      <input id="search" type="search" placeholder="Search files…" aria-label="Search files">
+      <input id="search" type="search" placeholder="Search names and contents…" aria-label="Search files">
     </div>
     <ul class="files" id="files" style="margin-top:12px"></ul>
   </section>
@@ -67,6 +80,7 @@
   </footer>
 </main>
 <script src="common.js"></script>
+<script src="templates.js"></script>
 <script>
 const APP = { writer: ['W', 'Document'], sheets: ['S', 'Spreadsheet'], slides: ['P', 'Presentation'] };
 const filesEl = document.getElementById('files');
@@ -83,18 +97,43 @@ function when(t) {
 function renderFiles() {
   const q = document.getElementById('search').value.trim().toLowerCase();
   const type = document.getElementById('filter').value;
-  const files = Docs.list(type).filter(d => APP[d.app] && (!q || d.title.toLowerCase().includes(q)));
+  // Match titles first, then file contents (with a snippet showing where).
+  const files = Docs.list(type).filter(d => APP[d.app]).map(d => {
+    if (!q || d.title.toLowerCase().includes(q)) return { ...d };
+    const text = docText(d), at = text.toLowerCase().indexOf(q);
+    if (at < 0) return null;
+    const start = Math.max(0, at - 30);
+    return { ...d, snip: (start ? '…' : '') + esc(text.slice(start, at)) + '<mark>' + esc(text.slice(at, at + q.length)) + '</mark>' + esc(text.slice(at + q.length, at + q.length + 50)) };
+  }).filter(Boolean);
   if (!files.length) {
     filesEl.innerHTML = `<li class="empty">${Docs.all().length ? 'No files match.' : 'No files yet — create one above, or open a .docx/.xlsx from inside an app.'}</li>`;
   } else {
     filesEl.innerHTML = files.map(d => `<li>
       <div class="icon ${d.app}">${APP[d.app][0]}</div>
-      <a href="${Docs.url(d.app, d.id)}"><strong>${esc(d.title)}</strong><span>${APP[d.app][1]} · edited ${when(d.updated)}</span></a>
+      <a href="${Docs.url(d.app, d.id)}"><strong>${esc(d.title)}</strong><span>${APP[d.app][1]} · edited ${when(d.updated)}</span>${d.snip ? `<span class="snip">${d.snip}</span>` : ''}</a>
       <button data-dup="${esc(d.id)}" title="Make a copy">Copy</button>
       <button data-del="${esc(d.id)}" title="Delete">Delete</button></li>`).join('');
   }
   updateMeter();
 }
+
+// Plain text of a file, for searching. DOMParser never runs scripts, so this is safe on stored HTML.
+function docText(meta) {
+  const st = Docs.get(meta.id);
+  if (!st) return '';
+  if (meta.app === 'writer') return (new DOMParser().parseFromString(String(st.html || ''), 'text/html').body.textContent || '').replace(/\s+/g, ' ');
+  if (meta.app === 'sheets') return Object.values(st.raw || {}).filter(v => v && !v.startsWith('=')).join(' · ');
+  return (st.deck?.slides || []).flatMap(s => (s.items || []).map(i => i.text || '')).join(' · ').replace(/\s+/g, ' ');
+}
+
+document.getElementById('templates').innerHTML = TEMPLATES.map((t, i) =>
+  `<button data-tpl="${i}"><span class="tag ${t.app}">${APP[t.app][1]}</span><strong>${esc(t.name)}</strong><span class="d">${esc(t.description)}</span></button>`).join('');
+document.getElementById('templates').addEventListener('click', e => {
+  const btn = e.target.closest('[data-tpl]'); if (!btn) return;
+  const t = TEMPLATES[+btn.dataset.tpl];
+  const id = Docs.create(t.app, JSON.parse(JSON.stringify(t.state)));
+  if (id) location.href = Docs.url(t.app, id);
+});
 
 function updateMeter() {
   let chars = 0;
